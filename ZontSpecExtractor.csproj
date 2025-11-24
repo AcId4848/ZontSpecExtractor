@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<OutputType>WinExe</OutputType>
+		<TargetFramework>net8.0-windows</TargetFramework>
+		<!-- Можно изменить на net7.0-windows или net8.0-windows -->
+		<Nullable>enable</Nullable>
+		<UseWindowsForms>true</UseWindowsForms>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AssemblyName>ZontSpecExtractor</AssemblyName>
+		<RootNamespace>ZontSpecExtractor</RootNamespace>
+		<ApplicationIcon>avklogo.ico</ApplicationIcon>
+	</PropertyGroup>
+
+	<ItemGroup>
+	  <COMReference Include="VisioViewer">
+	    <WrapperTool>tlbimp</WrapperTool>
+	    <VersionMinor>6</VersionMinor>
+	    <VersionMajor>1</VersionMajor>
+	    <Guid>ba35b84e-a623-471b-8b09-6d72dd072f25</Guid>
+	    <Lcid>0</Lcid>
+	    <Isolated>false</Isolated>
+	    <EmbedInteropTypes>true</EmbedInteropTypes>
+	  </COMReference>
+	  <COMReference Include="Microsoft.Office.Interop.Visio">
+	    <WrapperTool>tlbimp</WrapperTool>
+	    <VersionMinor>16</VersionMinor>
+	    <VersionMajor>4</VersionMajor>
+	    <Guid>00021a98-0000-0000-c000-000000000046</Guid>
+	    <Lcid>0</Lcid>
+	    <Isolated>false</Isolated>
+	    <EmbedInteropTypes>true</EmbedInteropTypes>
+	  </COMReference>
+	  <COMReference Include="Microsoft.Office.Interop.Visio.SaveAsWeb">
+	    <WrapperTool>tlbimp</WrapperTool>
+	    <VersionMinor>16</VersionMinor>
+	    <VersionMajor>4</VersionMajor>
+	    <Guid>50603aed-99e4-4f88-a4ea-3d4c06ec4346</Guid>
+	    <Lcid>0</Lcid>
+	    <Isolated>false</Isolated>
+	    <EmbedInteropTypes>true</EmbedInteropTypes>
+	  </COMReference>
+	  <COMReference Include="Microsoft.Office.Interop.VisOcx">
+	    <WrapperTool>tlbimp</WrapperTool>
+	    <VersionMinor>4</VersionMinor>
+	    <VersionMajor>1</VersionMajor>
+	    <Guid>f1a8dfe4-bc61-48ba-afda-96df10247af0</Guid>
+	    <Lcid>0</Lcid>
+	    <Isolated>false</Isolated>
+	    <EmbedInteropTypes>true</EmbedInteropTypes>
+	  </COMReference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="EPPlus" Version="7.0.0" />
+		<!-- Или последняя стабильная версия -->
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Compile Update="Properties\Resources.Designer.cs">
+	    <DesignTime>True</DesignTime>
+	    <AutoGen>True</AutoGen>
+	    <DependentUpon>Resources.resx</DependentUpon>
+	  </Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <EmbeddedResource Update="Properties\Resources.resx">
+	    <Generator>ResXFileCodeGenerator</Generator>
+	    <LastGenOutput>Resources.Designer.cs</LastGenOutput>
+	  </EmbeddedResource>
+	</ItemGroup>
+
+</Project>
