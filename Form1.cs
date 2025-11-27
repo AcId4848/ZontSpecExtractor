@@ -13,6 +13,7 @@ using System.Windows.Forms;
 using ZontSpecExtractor.Properties;
 using Visio = Microsoft.Office.Interop.Visio;
 
+
 namespace ZontSpecExtractor
 {
     // =========================================================================
@@ -40,6 +41,9 @@ namespace ZontSpecExtractor
         [System.Text.Json.Serialization.JsonIgnore]
         public List<string> AvailableMasters { get; set; } = new List<string>();
 
+        public string PageSize { get; set; } = "A4"; // Например: "A4", "A3"
+        public string PageOrientation { get; set; } = "Portrait"; // Или "Landscape"
+
         public VisioConfiguration(bool isScheme)
         {
             if (isScheme)
@@ -64,20 +68,29 @@ namespace ZontSpecExtractor
 
     public class SearchRule
     {
-        // Основное слово для поиска в Excel (бывшее Term)
+        // Основное слово для поиска в Excel (используется и для поиска, и для маппинга Visio)
         public string ExcelValue { get; set; } = "";
 
-        // Столбец для поиска (например "C")
-        public string SearchColumn { get; set; } = "C";
+        // === СВОЙСТВА ДЛЯ КАРТЫ VISIO (Excel=Col=Master) ===
+        public string SearchColumn { get; set; } = ""; // ВОССТАНОВЛЕНО: Колонка, в которой ищется ExcelValue для маппинга
+
+        // === НОВЫЕ СВОЙСТВА ДЛЯ ОБЩИХ НАСТРОЕК ПОИСКА ===
+        // Если true, то даже если найдено 10 раз, в Visio попадет только 1 фигура
+        public bool LimitQuantity { get; set; } = false;
+
+        // Логика условий
+        public bool UseCondition { get; set; } = false;
+
+        // Значение условия (например "1", "V", "Да")
+        public string ConditionValue { get; set; } = "";
+
+        // Колонка, в которой проверяется условие (например "D" или "5")
+        public string ConditionColumn { get; set; } = "";
 
         // Имя мастера Visio
         public string VisioMasterName { get; set; } = "";
 
-        // Логика условий
-        public bool UseCondition { get; set; } = true;
-        public string ConditionValue { get; set; } = "";
-
-        // Свойство для совместимости с кодом поиска (Binding)
+        // Свойство для совместимости с кодом поиска
         [System.Text.Json.Serialization.JsonIgnore]
         public string Term { get => ExcelValue; set => ExcelValue = value; }
     }
@@ -161,6 +174,7 @@ namespace ZontSpecExtractor
     // 2. ФОРМА ОБЩИХ НАСТРОЕК (GeneralSettingsForm)
     // =========================================================================
 
+
     public class GeneralSettingsForm : Form
     {
         private RichTextBox _rtxtSchemePaths, _rtxtLabelingPaths, _rtxtCabinetPaths;
@@ -168,8 +182,24 @@ namespace ZontSpecExtractor
         private RichTextBox _rtxtSchemePredefined, _rtxtLabelingPredefined, _rtxtCabinetPredefined;
         private RichTextBox _rtxtSheetNames;
         private DataGridView _dgvSearchRules;
-        //private RichTextBox _rtxtTargetSheets; // <-- Новое/Исправленное поле для целевых листов
-        //private RichTextBox _rtxtSearchWords;  // <-- Поле для слов поиска (если оно используется)
+
+        // Вспомогательный метод для корректной очистки COM-объектов
+        private static void ReleaseComObject(object obj)
+        {
+            try
+            {
+                if (obj != null && Marshal.IsComObject(obj))
+                {
+                    Marshal.ReleaseComObject(obj);
+                }
+            }
+            catch (Exception) { /* Игнорировать ошибки при очистке */ }
+            finally
+            {
+                obj = null;
+            }
+        }
+
 
         public GeneralSettingsForm()
         {
@@ -215,12 +245,59 @@ namespace ZontSpecExtractor
             layout.Controls.Add(_rtxtSheetNames, 0, 1);
 
             layout.Controls.Add(new Label { Text = "Правила поиска:", Dock = DockStyle.Bottom, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 2);
+
+            // --- ОБНОВЛЕНИЕ ТАБЛИЦЫ ---
             _dgvSearchRules = new DataGridView { Dock = DockStyle.Fill, AutoGenerateColumns = false, BackgroundColor = Color.White };
-            _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Искомое слово", DataPropertyName = "ExcelValue", AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill });
-            _dgvSearchRules.Columns.Add(new DataGridViewCheckBoxColumn { HeaderText = "Условие?", DataPropertyName = "UseCondition", Width = 70 });
-            _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Значение условия", DataPropertyName = "ConditionValue", Width = 100 });
+
+            // 1. Искомое слово
+            _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Искомое слово",
+                DataPropertyName = "ExcelValue",
+                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill
+            });
+
+            // 2. Ограничение (Галочка)
+            _dgvSearchRules.Columns.Add(new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "Фикс. 1шт?",
+                ToolTipText = "Если найдено много раз, добавлять только 1 раз?",
+                DataPropertyName = "LimitQuantity",
+                Width = 80
+            });
+
+            // 3. Условие (Галочка)
+            _dgvSearchRules.Columns.Add(new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "Условие?",
+                DataPropertyName = "UseCondition",
+                Width = 70
+            });
+
+            // 4. Значение условия
+            _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Значение условия",
+                DataPropertyName = "ConditionValue",
+                Width = 100
+            });
+
+            // 5. Колонка условия
+            _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                HeaderText = "Ячейка (Кол.)",
+                ToolTipText = "Буква колонки (например D) где проверять условие",
+                DataPropertyName = "ConditionColumn",
+                Width = 90
+            });
+
+            // Visio Master (нужен для связки, хотя редактируется в другом месте, здесь можно оставить пустым или скрыть)
+            // Но лучше оставить, чтобы понимать, что мы ищем, если маппинг идет отсюда. 
+            // В вашей текущей логике маппинг идет в другом окне, но правила хранятся здесь.
+
             _dgvSearchRules.DataSource = new System.ComponentModel.BindingList<SearchRule>(AppSettings.SearchConfig.Rules ?? new List<SearchRule>());
             layout.Controls.Add(_dgvSearchRules, 0, 3);
+            // ---------------------------
 
             panel.Controls.Add(layout);
             return panel;
@@ -229,7 +306,7 @@ namespace ZontSpecExtractor
         private Panel CreateVisioConfigPanel()
         {
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2, RowStyles = { new RowStyle(SizeType.Absolute, 30), new RowStyle(SizeType.Percent, 100) }, ColumnStyles = { new ColumnStyle(SizeType.Percent, 33), new ColumnStyle(SizeType.Percent, 33), new ColumnStyle(SizeType.Percent, 33) } };
-            layout.Controls.Add(new Label { Text = "Настройка соответствий (Excel=Col=Visio) и фигур (Name,Qty,X,Y)", Dock = DockStyle.Fill, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 0);
+            layout.Controls.Add(new Label { Text = "Настройка соответствий (Excel=Col=Visio) и фигур (Name,Qty,X,Y)", Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 0);
             layout.SetColumnSpan(layout.GetControlFromPosition(0, 0), 3);
 
             // Инициализируем RichTextBoxes, которые являются полями класса
@@ -261,20 +338,45 @@ namespace ZontSpecExtractor
             l.Controls.Add(new Label { Text = title, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 0);
 
             l.Controls.Add(new Label { Text = "Трафареты:", Dock = DockStyle.Bottom }, 0, 1);
-            // Теперь rPath используется как обычная переменная
             rPath.Text = string.Join(Environment.NewLine, cfg.StencilFilePaths); // Присваиваем текст
             l.Controls.Add(rPath, 0, 2);
 
-            var btnP = new FlowLayoutPanel { Dock = DockStyle.Fill };
+            var btnP = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+
+            // Кнопка "+" (Добавить трафареты)
             var btnAdd = new Button { Text = "+", Width = 30 };
             btnAdd.Click += (s, e) =>
             {
                 using (var ofd = new OpenFileDialog { Multiselect = true, Filter = "Visio|*.vssx;*.vsdx" })
                 {
-                    if (ofd.ShowDialog() == DialogResult.OK) { cfg.StencilFilePaths = ofd.FileNames.ToList(); rPath.Text = string.Join(Environment.NewLine, cfg.StencilFilePaths); }
+                    if (ofd.ShowDialog() == DialogResult.OK)
+                    {
+                        // Добавляем только те, которых нет
+                        cfg.StencilFilePaths.AddRange(ofd.FileNames.Where(f => !cfg.StencilFilePaths.Contains(f)));
+                        rPath.Text = string.Join(Environment.NewLine, cfg.StencilFilePaths);
+                    }
                 }
             };
             btnP.Controls.Add(btnAdd);
+
+            // Кнопка "X" (Удалить трафареты)
+            var btnClear = new Button { Text = "X", Width = 30, ForeColor = Color.Red };
+            btnClear.Click += (s, e) =>
+            {
+                if (MessageBox.Show("Очистить список трафаретов?", "Подтверждение", MessageBoxButtons.YesNo) == DialogResult.Yes)
+                {
+                    cfg.StencilFilePaths.Clear();
+                    rPath.Text = "";
+                    cfg.AvailableMasters.Clear(); // Также очищаем список мастеров
+                }
+            };
+            btnP.Controls.Add(btnClear);
+
+            // КНОПКА ДЛЯ СКАНИРОВАНИЯ ФИГУР. ПЕРЕДАЕМ RichTextBox (rPre)
+            var btnScan = new Button { Text = "Сканировать фигуры", AutoSize = true, BackColor = Color.LightGreen };
+            btnScan.Click += (s, e) => ScanMasters(cfg, rPre);
+            btnP.Controls.Add(btnScan);
+
             l.Controls.Add(btnP, 0, 3);
 
             l.Controls.Add(new Label { Text = "Фигуры (Name,Qty,X,Y):", Dock = DockStyle.Bottom, ForeColor = Color.Blue }, 0, 4);
@@ -288,6 +390,122 @@ namespace ZontSpecExtractor
             p.Controls.Add(l);
             return p;
         }
+
+        // Метод ShowMasterListWindow больше не нужен, так как фигуры сразу добавляются в RichTextBox
+
+        // =========================================================================
+        // ИСПРАВЛЕННЫЙ МЕТОД: ScanMasters (Теперь добавляет в RichTextBox)
+        // =========================================================================
+        private void ScanMasters(VisioConfiguration cfg, RichTextBox rPre)
+        {
+            if (!cfg.StencilFilePaths.Any())
+            {
+                MessageBox.Show("Сначала добавьте файлы трафаретов (*.vssx, *.vsdx)!", "Внимание", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            Visio.Application? visioApp = null;
+            Visio.Document? stencilDoc = null;
+
+            try
+            {
+                cfg.AvailableMasters.Clear();
+
+                // 1. Запуск Visio
+                visioApp = new Visio.Application();
+                visioApp.Visible = false; // Работаем в фоновом режиме
+
+                // 2. Проход по всем файлам трафаретов
+                foreach (var path in cfg.StencilFilePaths.Where(File.Exists))
+                {
+                    // Открываем трафарет. visOpenHidden (4) для открытия без отображения
+                    stencilDoc = visioApp.Documents.OpenEx(path, (short)Visio.VisOpenSaveArgs.visOpenHidden);
+
+                    // Извлекаем все имена мастеров
+                    foreach (Visio.Master master in stencilDoc.Masters)
+                    {
+                        if (!cfg.AvailableMasters.Contains(master.NameU))
+                        {
+                            cfg.AvailableMasters.Add(master.NameU);
+                        }
+                        ReleaseComObject(master);
+                    }
+
+                    // Закрываем трафарет
+                    stencilDoc.Close();
+                    ReleaseComObject(stencilDoc);
+                    stencilDoc = null;
+                }
+
+                // 3. Сообщаем об успехе и предлагаем добавить фигуры
+                string successMessage = $"Сканирование завершено.\nОбработано трафаретов: {cfg.StencilFilePaths.Count}\nНайдено уникальных фигур: {cfg.AvailableMasters.Count}";
+
+                if (cfg.AvailableMasters.Any())
+                {
+                    // Копируем в буфер обмена для удобства
+                    Clipboard.SetText(string.Join(Environment.NewLine, cfg.AvailableMasters.OrderBy(m => m)));
+                    successMessage += "\n\nСписок фигур скопирован в буфер обмена.";
+
+                    // НОВОЕ: Спрашиваем, нужно ли добавить фигуры в RichTextBox
+                    var result = MessageBox.Show(
+                        successMessage + "\n\nХотите добавить найденные фигуры в список предопределенных мастеров (Name,Qty,X,Y) в текущем окне?",
+                        "Добавить фигуры",
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question
+                    );
+
+                    if (result == DialogResult.Yes)
+                    {
+                        // Форматируем новые мастера для вставки
+                        var newMastersText = string.Join(Environment.NewLine, cfg.AvailableMasters
+                            .OrderBy(m => m)
+                            .Select(m => $"{m},1,0,0")); // Формат: MasterName,Quantity,X,Y
+
+                        // Добавляем к текущему содержимому RichTextBox
+                        string currentText = rPre.Text.Trim();
+                        if (!string.IsNullOrEmpty(currentText))
+                        {
+                            // Добавляем новые элементы, проверяя, чтобы избежать дубликатов в RichTextBox 
+                            // (хотя дубликаты могут возникнуть, если пользователь ранее вручную ввел)
+                            rPre.Text = currentText + Environment.NewLine + newMastersText;
+                        }
+                        else
+                        {
+                            rPre.Text = newMastersText;
+                        }
+
+                        MessageBox.Show("Фигуры добавлены в текстовое поле 'Фигуры (Name,Qty,X,Y)'.\n\nНе забудьте нажать 'Сохранить'!", "Готово", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    }
+                }
+                else
+                {
+                    MessageBox.Show(successMessage, "Успех", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка сканирования Visio: {ex.Message}", "Ошибка Visio COM", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                // 4. Очистка COM-объектов
+                if (stencilDoc != null)
+                {
+                    try { stencilDoc.Close(); } catch { }
+                    ReleaseComObject(stencilDoc);
+                }
+                if (visioApp != null)
+                {
+                    try { visioApp.Quit(); } catch { }
+                    ReleaseComObject(visioApp);
+                }
+                // Вызов сборщика мусора для полной очистки COM-ссылок
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        }
+
+        // ... (остальные методы ParseRules, ParsePre, ParsePredefinedConfigs, ParseList, ParseSearchRules, BtnSave_Click) ...
 
         private List<SearchRule> ParseRules(string text)
         {
@@ -311,63 +529,19 @@ namespace ZontSpecExtractor
                 {
                     var c = new PredefinedMasterConfig { MasterName = p[0] };
                     if (p.Length > 1 && int.TryParse(p[1], out int q)) c.Quantity = q;
-                    if (p.Length > 2) c.CoordinatesXY = $"{p[2]},{(p.Length > 3 ? p[3] : "0")}";
+                    if (p.Length >= 3) c.CoordinatesXY = $"{p[2]},{(p.Length > 3 ? p[3] : "0")}";
+                    else c.CoordinatesXY = "0,0";
                     res.Add(c);
                 }
             }
             return res;
         }
-    
-
-        // НОВЫЙ МЕТОД ДЛЯ ПАРСИНГА ПРЕДОПРЕДЕЛЕННЫХ КОНФИГУРАЦИЙ
-        private List<PredefinedMasterConfig> ParsePredefinedConfigs(string text)
-        {
-            var configs = new List<PredefinedMasterConfig>();
-            var lines = text.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries);
-
-            foreach (var line in lines)
-            {
-                // Ожидаем формат: MasterName,Quantity,X,Y (разделение запятыми)
-                var parts = line.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(p => p.Trim()).ToArray();
-
-                string masterName = parts.FirstOrDefault() ?? string.Empty;
-                int quantity = 1;
-                string coords = "0,0";
-
-                if (parts.Length >= 2 && int.TryParse(parts[1], out int q))
-                {
-                    quantity = q;
-                }
-
-                if (parts.Length >= 4)
-                {
-                    // Формат MasterName,Quantity,X,Y
-                    coords = $"{parts[2]},{parts[3]}";
-                }
-                else if (parts.Length >= 3)
-                {
-                    // Формат MasterName,Quantity,Coords
-                    coords = parts[2];
-                }
-
-                if (!string.IsNullOrEmpty(masterName))
-                {
-                    configs.Add(new PredefinedMasterConfig
-                    {
-                        MasterName = masterName,
-                        Quantity = quantity,
-                        CoordinatesXY = coords
-                    });
-                }
-            }
-            return configs;
-        }
 
         private List<string> ParseList(RichTextBox rtb)
         {
             return rtb.Text.Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)
-                          .Select(s => s.Trim())
-                          .ToList();
+                            .Select(s => s.Trim())
+                            .ToList();
         }
 
         private List<SearchRule> ParseSearchRules(RichTextBox rtb)
@@ -391,7 +565,6 @@ namespace ZontSpecExtractor
             return rules;
         }
 
-        // Для преобразования текста в список предопределенных фигур (Name,Qty,X,Y)
         private List<PredefinedMasterConfig> ParsePredefinedConfigs(RichTextBox rtb)
         {
             var configs = new List<PredefinedMasterConfig>();
@@ -400,14 +573,27 @@ namespace ZontSpecExtractor
             foreach (var line in lines)
             {
                 var parts = line.Split(',').Select(p => p.Trim()).ToArray();
-                if (parts.Length >= 2) // MasterName, Quantity, [CoordinatesXY]
+                if (parts.Length >= 1) // MasterName, [Quantity], [X], [Y]
                 {
-                    configs.Add(new PredefinedMasterConfig
+                    var masterName = parts[0];
+                    int quantity = parts.Length > 1 && int.TryParse(parts[1], out int qty) ? qty : 1;
+                    string coords = "0,0";
+
+                    if (parts.Length >= 3)
                     {
-                        MasterName = parts[0],
-                        Quantity = int.TryParse(parts[1], out int qty) ? qty : 1,
-                        CoordinatesXY = parts.Length > 2 ? $"{parts[2]},{parts[3]}" : null
-                    });
+                        if (parts.Length >= 4) coords = $"{parts[2]},{parts[3]}";
+                        else coords = $"{parts[2]},0";
+                    }
+
+                    if (!string.IsNullOrEmpty(masterName))
+                    {
+                        configs.Add(new PredefinedMasterConfig
+                        {
+                            MasterName = masterName,
+                            Quantity = quantity,
+                            CoordinatesXY = coords
+                        });
+                    }
                 }
             }
             return configs;
@@ -420,17 +606,19 @@ namespace ZontSpecExtractor
                 // 1. Обновляем настройки Visio (SearchRules вместо MasterMap)
                 AppSettings.SchemeConfig.SearchRules = ParseSearchRules(_rtxtSchemeMap);
                 AppSettings.LabelingConfig.SearchRules = ParseSearchRules(_rtxtLabelingMap);
+                AppSettings.CabinetConfig.SearchRules = ParseSearchRules(_rtxtCabinetMap);
 
-                // 2. Обновляем предопределенные мастера (ParsePredefinedConfigs вместо ParseList)
+                // 2. Обновляем предопределенные мастера
                 AppSettings.SchemeConfig.PredefinedMasterConfigs = ParsePredefinedConfigs(_rtxtSchemePredefined);
                 AppSettings.LabelingConfig.PredefinedMasterConfigs = ParsePredefinedConfigs(_rtxtLabelingPredefined);
+                AppSettings.CabinetConfig.PredefinedMasterConfigs = ParsePredefinedConfigs(_rtxtCabinetPredefined);
 
-                // 3. Обновляем слова для поиска (остается ParseList)
-                AppSettings.SearchConfig.TargetSheetNames = ParseList(_rtxtSheetNames); // Используем ParseList
+                // 3. Обновляем целевые листы для поиска
+                AppSettings.SearchConfig.TargetSheetNames = ParseList(_rtxtSheetNames);
 
                 // --- СОХРАНЕНИЕ ПРАВИЛ ПОИСКА ИЗ ТАБЛИЦЫ ---
                 var newRules = new List<SearchRule>();
-                if (_dgvSearchRules.DataSource is IEnumerable<SearchRule> list)
+                if (_dgvSearchRules.DataSource is System.ComponentModel.BindingList<SearchRule> list)
                 {
                     newRules = list.Where(r => !string.IsNullOrWhiteSpace(r.Term)).ToList();
                 }
@@ -551,6 +739,47 @@ namespace ZontSpecExtractor
             UpdateStatus($"Настройки загружены.");
         }
 
+        // Хелпер для конвертации "A" -> 1, "AA" -> 27
+        private int GetColumnIndex(string columnName)
+        {
+            if (string.IsNullOrEmpty(columnName)) return 0;
+
+            // Если пользователь ввел число
+            if (int.TryParse(columnName, out int index)) return index;
+
+            // Если буквы
+            columnName = columnName.ToUpperInvariant();
+            int sum = 0;
+            foreach (char c in columnName)
+            {
+                if (c < 'A' || c > 'Z') return 0; // Невалидный символ
+                sum *= 26;
+                sum += (c - 'A' + 1);
+            }
+            return sum;
+        }
+
+        /// <summary>
+        /// Определяет размеры страницы в дюймах на основе формата и ориентации.
+        /// </summary>
+        private (double width, double height) GetPageDimensions(string size, string orientation)
+        {
+            // Размеры А4 в дюймах (210x297 мм)
+            const double A4_WIDTH = 8.2677;
+            const double A4_HEIGHT = 11.6929;
+
+            // В будущем здесь можно добавить логику для А3 и других форматов
+            double w = A4_WIDTH;
+            double h = A4_HEIGHT;
+
+            // Если ориентация Landscape, меняем местами ширину и высоту
+            if (orientation.Equals("Landscape", StringComparison.OrdinalIgnoreCase))
+            {
+                return (h, w);
+            }
+
+            return (w, h); // Portrait
+        }
 
 
         private void UpdateStatus(string message)
@@ -944,10 +1173,11 @@ namespace ZontSpecExtractor
             return count;
         }
 
-        private struct ExcelMatch
+        public class ExcelMatch
         {
-            public string Sheet;
-            public string Value; // Полное содержимое ячейки
+            public string Sheet { get; set; } = ""; // <- Добавлено для устранения CS0649
+            public string Value { get; set; } = ""; // <- Добавлено для устранения CS0649
+                                                    
         }
 
         // --- НОВЫЙ МЕТОД: Поиск, вывод содержимого и подсчет схожих ячеек ---
@@ -956,7 +1186,7 @@ namespace ZontSpecExtractor
         {
             var finalRows = new List<Dictionary<string, string>>();
             var targetSheets = AppSettings.SearchConfig.TargetSheetNames;
-            var rules = AppSettings.SearchConfig.Rules; // Берем правила из конфига
+            var rules = AppSettings.SearchConfig.Rules;
 
             if (rules == null || !rules.Any()) return finalRows;
 
@@ -971,13 +1201,17 @@ namespace ZontSpecExtractor
                     int endRow = ws.Dimension.End.Row;
                     int endCol = ws.Dimension.End.Column;
 
+                    // Кэш значений для правил "Ограниченное кол-во"
+                    // Словарь: ИмяПравила -> Найдены ли уже совпадения?
+                    var limitedRulesFound = new HashSet<string>();
+
                     // Сканируем построчно
                     for (int row = startRow; row <= endRow; row++)
                     {
-                        // Получаем содержимое всех ячеек строки (кэшируем для скорости)
-                        // Ограничиваемся первыми 20 колонками
+                        // Получаем содержимое строки (кэшируем первые 30 колонок для скорости поиска слова)
                         var rowValues = new List<string>();
-                        for (int c = 1; c <= Math.Min(endCol, 30); c++)
+                        int maxColToScan = Math.Min(endCol, 30);
+                        for (int c = 1; c <= maxColToScan; c++)
                         {
                             rowValues.Add(ws.Cells[row, c].Text.Trim());
                         }
@@ -986,55 +1220,65 @@ namespace ZontSpecExtractor
                         {
                             if (string.IsNullOrWhiteSpace(rule.Term)) continue;
 
-                            bool termFound = false;
-                            bool conditionMet = false;
+                            bool match = false;
                             string foundQty = "0";
 
-                            // 1. Ищем слово (Term)
-                            // Проверяем, содержит ли какая-либо ячейка искомое слово
+                            // 1. Ищем слово (Term) в строке
                             if (rowValues.Any(v => v.IndexOf(rule.Term, StringComparison.OrdinalIgnoreCase) >= 0))
                             {
-                                termFound = true;
-                            }
-
-                            if (!termFound) continue; // Слово не найдено, идем к следующему правилу
-
-                            // 2. Проверяем алгоритм (Условие)
-                            if (rule.UseCondition && !string.IsNullOrEmpty(rule.ConditionValue))
-                            {
-                                // АЛГОРИТМ: Слово есть + в этой строке есть ячейка с точным значением (напр "1")
-                                // Часто "1" стоит в колонке количества или галочки
-                                conditionMet = rowValues.Any(v => v.Equals(rule.ConditionValue, StringComparison.OrdinalIgnoreCase));
-
-                                if (conditionMet)
+                                // 2. Проверка условия
+                                if (rule.UseCondition)
                                 {
-                                    foundQty = "1"; // Если условие выполнено (есть "1"), берем 1 шт.
+                                    // Получаем индекс колонки условия (например "D" -> 4)
+                                    int conditionColIndex = GetColumnIndex(rule.ConditionColumn);
+
+                                    if (conditionColIndex > 0 && conditionColIndex <= endCol)
+                                    {
+                                        string cellValue = ws.Cells[row, conditionColIndex].Text.Trim();
+                                        // Проверяем совпадение значения
+                                        if (cellValue.Equals(rule.ConditionValue, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            match = true;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // Условие не используется - просто нашли слово
+                                    match = true;
                                 }
                             }
-                            else
+
+                            if (match)
                             {
-                                // ОБЫЧНЫЙ ПОИСК: Слово есть, ищем любое число в строке как количество
-                                conditionMet = true; // Условия нет, значит совпадения слова достаточно
+                                // Определяем количество
+                                if (rule.LimitQuantity)
+                                {
+                                    // Логика "Ограниченное количество":
+                                    // Мы записываем "1", но при группировке мы учтем это правило.
+                                    // Или можно просто добавлять, а на этапе группировки срезать.
+                                    foundQty = "1";
+                                }
+                                else
+                                {
+                                    // Обычная логика: ищем число в строке (эвристика) или берем 1
+                                    var numStr = rowValues.FirstOrDefault(v =>
+                                        double.TryParse(v, out double d) && d > 0 && d < 1000);
+                                    foundQty = numStr ?? "1";
+                                }
 
-                                // Ищем число
-                                var numStr = rowValues.FirstOrDefault(v =>
-                                    double.TryParse(v, out double d) && d > 0 && d < 1000); // Эвристика
-
-                                foundQty = numStr ?? "1";
-                            }
-
-                            // Если все проверки пройдены
-                            if (termFound && conditionMet)
-                            {
+                                // Добавляем запись. 
+                                // Важно: сохраняем ссылку на правило (LimitQuantity), чтобы использовать при группировке.
                                 finalRows.Add(new Dictionary<string, string>
                                 {
                                     ["Лист"] = sheetName,
-                                    ["Наименование"] = rule.Term, // Используем имя правила как ключ для группировки
-                                    ["Количество"] = foundQty
+                                    ["Наименование"] = rule.Term,
+                                    ["Количество"] = foundQty,
+                                    ["_IsLimited"] = rule.LimitQuantity.ToString() // Внутренний флаг
                                 });
 
-                                // Важно: Если нашли правило для этой строки, прерываем цикл правил? 
-                                // Обычно да, чтобы не дублировать одну деталь дважды
+                                // Прерываем цикл правил для этой строки (чтобы одну строку не посчитать дважды для разных правил?)
+                                // Зависит от задачи. Обычно лучше break.
                                 break;
                             }
                         }
@@ -1042,12 +1286,26 @@ namespace ZontSpecExtractor
                 }
             }
 
-            // Группировка результатов
+            // ГРУППИРОВКА И ПОДСЧЕТ ИТОГОВ
             return finalRows
                 .GroupBy(r => new { Sheet = r["Лист"], Name = r["Наименование"] })
                 .Select(g =>
                 {
-                    int totalQty = g.Sum(x => int.TryParse(x["Количество"], out int q) ? q : 0);
+                    // Проверяем, было ли у этого правила ограничение (смотрим на флаг первой попавшейся записи группы)
+                    bool isLimited = bool.TryParse(g.First().GetValueOrDefault("_IsLimited"), out bool limit) && limit;
+
+                    int totalQty;
+                    if (isLimited)
+                    {
+                        // Если стоит галочка "Ограничить", то независимо от количества найденных строк, сумма = 1
+                        totalQty = 1;
+                    }
+                    else
+                    {
+                        // Иначе суммируем всё, что нашли
+                        totalQty = g.Sum(x => int.TryParse(x["Количество"], out int q) ? q : 0);
+                    }
+
                     return new Dictionary<string, string>
                     {
                         ["Лист"] = g.Key.Sheet,
@@ -1055,7 +1313,7 @@ namespace ZontSpecExtractor
                         ["Количество"] = totalQty.ToString()
                     };
                 })
-                .Where(x => x["Количество"] != "0") // Убираем пустые
+                .Where(x => x["Количество"] != "0")
                 .ToList();
         }
 
@@ -1104,7 +1362,8 @@ namespace ZontSpecExtractor
 
         private void GeneratePage(Visio.Document doc, string pageName, Dictionary<string, int> masterCounts, List<SearchRule> SearchRules)
         {
-            var masterMap = RulesToMap(сonfig.SearchRules);
+            // ИСПРАВЛЕНО: используем переданный аргумент SearchRules вместо несуществующего config
+            var masterMap = RulesToMap(SearchRules);
 
             // 1. Создание нового листа (если его нет) или выбор активного
             Visio.Page page;
@@ -1123,10 +1382,13 @@ namespace ZontSpecExtractor
             // Параметры размещения
             double currentX = 0.5; // Начальная позиция X (в метрах)
             double currentY = 0.5; // Начальная позиция Y (в метрах)
-            //double columnWidth = 0; // Ширина самого широкого элемента в текущей колонке
             double rowHeight = 0; // Высота самого высокого элемента в текущей строке
-            const double SPACING = 0.05; // Отступ между фигурами (в метрах)
-            const double PAGE_WIDTH = 0.279; // Примерная ширина страницы А4 (27.9 см)
+
+            // ИСПРАВЛЕНО: Закомментированы неиспользуемые переменные (CS0219)
+            // const double SPACING = 0.05; 
+            // const double PAGE_WIDTH = 0.279; 
+            const double SPACING = 0.05; // Если вы планируете использовать их, раскомментируйте и добавьте логику
+            const double PAGE_WIDTH = 0.279;
 
             // Проходим по всем элементам, которые нужно добавить (из Excel)
             foreach (var excelKeyCount in masterCounts)
@@ -1155,7 +1417,7 @@ namespace ZontSpecExtractor
                         {
                             // Переход на новую строку
                             currentX = 0.5;
-                            currentY += rowHeight + SPACING; // Сдвиг вниз на высоту самой высокой фигуры в предыдущей строке
+                            currentY += rowHeight + SPACING; // Сдвиг вниз
                             rowHeight = 0; // Сбрасываем высоту
                         }
 
@@ -1198,104 +1460,195 @@ namespace ZontSpecExtractor
             // btnLoad.Enabled = true;
         }
 
-        public static class VisioVbaRunner
+       
+
+public static class VisioVbaRunner
+    {
+        private static void ReleaseComObject(object obj)
         {
-            public static void RunDrawingMacro(Visio.Document doc, Visio.Page page, List<VisioItem> itemsToDraw)
+            try
             {
-                // 1. Проверка: если рисовать нечего, выходим, чтобы не создавать пустой макрос
-                if (itemsToDraw == null || itemsToDraw.Count == 0) return;
-
-                string pageName = page.Name;
-                string moduleName = "Mod_" + Guid.NewGuid().ToString("N").Substring(0, 8);
-
-                StringBuilder sb = new StringBuilder();
-
-                // --- НАЧАЛО VBA КОДА ---
-                sb.AppendLine($"Sub Draw_{moduleName}()");
-                sb.AppendLine($"    Dim pg As Visio.Page");
-                sb.AppendLine($"    Set pg = ActiveDocument.Pages.ItemU(\"{pageName}\")");
-                sb.AppendLine($"    Dim mst As Visio.Master");
-                sb.AppendLine($"    Dim doc As Visio.Document"); // Переменная для перебора документов
-                sb.AppendLine($"    Dim i As Integer");
-                sb.AppendLine($"    Dim found As Boolean");
-
-                // ОЧИСТКА ИМЕН ОТ ПЕРЕНОСОВ СТРОК (Важно!)
-                // Формируем массив имен
-                sb.Append("    Dim mastersArr As Variant: mastersArr = Array(");
-                sb.Append(string.Join(", ", itemsToDraw.Select(x =>
-                    $"\"{x.MasterName.Replace("\r", "").Replace("\n", "").Trim()}\"")));
-                sb.AppendLine(")");
-
-                // Массив X
-                sb.Append("    Dim xArr As Variant: xArr = Array(");
-                sb.Append(string.Join(", ", itemsToDraw.Select(x =>
-                    x.X.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))));
-                sb.AppendLine(")");
-
-                // Массив Y
-                sb.Append("    Dim yArr As Variant: yArr = Array(");
-                sb.Append(string.Join(", ", itemsToDraw.Select(x =>
-                    x.Y.ToString("0.000", System.Globalization.CultureInfo.InvariantCulture))));
-                sb.AppendLine(")");
-
-                // --- ЛОГИКА ПОИСКА В ТРАФАРЕТАХ ---
-                sb.AppendLine("");
-                sb.AppendLine("    For i = LBound(mastersArr) To UBound(mastersArr)");
-                sb.AppendLine("        Set mst = Nothing");
-                sb.AppendLine("        found = False");
-                sb.AppendLine("        Dim mName As String");
-                sb.AppendLine("        mName = mastersArr(i)");
-
-                // 1. Сначала ищем в самом документе (вдруг уже есть)
-                sb.AppendLine("        On Error Resume Next");
-                sb.AppendLine("        Set mst = ActiveDocument.Masters.ItemU(mName)");
-                sb.AppendLine("        On Error GoTo 0");
-
-                // 2. Если не нашли, ищем во ВСЕХ открытых трафаретах
-                sb.AppendLine("        If mst Is Nothing Then");
-                sb.AppendLine("            For Each doc In Application.Documents");
-                sb.AppendLine("                If doc.Type = 2 Then"); // 2 = visTypeStencil (Трафарет)
-                sb.AppendLine("                    On Error Resume Next");
-                sb.AppendLine("                    Set mst = doc.Masters.ItemU(mName)");
-                sb.AppendLine("                    On Error GoTo 0");
-                sb.AppendLine("                    If Not mst Is Nothing Then Exit For"); // Нашли! Выходим из цикла документов
-                sb.AppendLine("                End If");
-                sb.AppendLine("            Next doc");
-                sb.AppendLine("        End If");
-
-                // 3. Если нашли мастера - рисуем
-                sb.AppendLine("        If Not mst Is Nothing Then");
-                sb.AppendLine("            pg.Drop mst, xArr(i), yArr(i)");
-                sb.AppendLine("        End If");
-
-                sb.AppendLine("    Next i");
-                sb.AppendLine($"End Sub");
-                // --- КОНЕЦ VBA КОДА ---
-
-                try
+                if (obj != null && Marshal.IsComObject(obj))
                 {
-                    var vbProject = doc.VBProject;
-                    var vbComp = vbProject.VBComponents.Add(1); // 1 = vbext_ct_StdModule
-                    vbComp.Name = moduleName;
-                    vbComp.CodeModule.AddFromString(sb.ToString());
-
-                    // Запускаем макрос
-                    doc.ExecuteLine($"Draw_{moduleName}");
-
-                    // (Опционально) Удаляем модуль, если нужно проверить ошибки, закомментируйте строку ниже
-                    // vbProject.VBComponents.Remove(vbComp); 
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show(
-                        "Ошибка запуска VBA. \n\n" + ex.Message,
-                        "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    Marshal.ReleaseComObject(obj);
                 }
             }
+            catch (Exception) { /* Игнорировать ошибки при очистке */ }
         }
 
-        // Вспомогательный класс для передачи данных
-        public class VisioItem
+        public static void RunDrawingMacro(Visio.Document doc, Visio.Page page, List<VisioItem> itemsToDraw, VisioConfiguration config)
+        {
+            if (itemsToDraw == null || itemsToDraw.Count == 0) return;
+
+            string pageName = page.Name;
+            string moduleName = "Mod_" + Guid.NewGuid().ToString("N").Substring(0, 8);
+            StringBuilder sb = new StringBuilder();
+
+            var form1Instance = Form.ActiveForm as Form1;
+            if (form1Instance == null) return;
+
+            var (width, height) = form1Instance.GetPageDimensions(config.PageSize, config.PageOrientation);
+            string pageWidth = width.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            string pageHeight = height.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+            // --- НАЧАЛО VBA КОДА ---
+            sb.AppendLine($"Sub Draw_{moduleName}()");
+            sb.AppendLine($"    Dim pg As Visio.Page");
+            sb.AppendLine($"    Set pg = ActiveDocument.Pages.ItemU(\"{pageName}\")");
+            sb.AppendLine($"    Dim mst As Visio.Master");
+            sb.AppendLine($"    Dim doc As Visio.Document");
+            sb.AppendLine($"    Dim i As Integer");
+            sb.AppendLine($"    Dim found As Boolean");
+
+            // --- ДАННЫЕ: БЕЗОПАСНОЕ СОЗДАНИЕ МАССИВОВ ---
+            int count = itemsToDraw.Count;
+            int maxIndex = count - 1;
+
+            sb.AppendLine($"    ReDim mastersArr(0 To {maxIndex}) As String");
+            sb.AppendLine("");
+
+            for (int k = 0; k < count; k++)
+            {
+                var item = itemsToDraw[k];
+
+                string safeName = item.MasterName
+                    .Replace("\r", "")
+                    .Replace("\n", "")
+                    .Replace("\"", "\"\"")
+                    .Trim();
+
+                sb.AppendLine($"    mastersArr({k}) = \"{safeName}\"");
+            }
+            sb.AppendLine("    ' --------------------------------------------------");
+
+
+            // --- ЛОГИКА АВТОМАТИЧЕСКОГО РАЗМЕЩЕНИЯ (PACKING) ---
+            sb.AppendLine("");
+            sb.AppendLine($"    ' --- КОНСТАНТЫ РАЗМЕРА ЛИСТА (В ДЮЙМАХ) ---");
+            sb.AppendLine($"    Const PAGE_WIDTH As Double = {pageWidth}");
+            sb.AppendLine($"    Const PAGE_HEIGHT As Double = {pageHeight}");
+            sb.AppendLine($"    Const MARGIN As Double = 0.1");
+            sb.AppendLine($"    Dim CurrentX As Double");
+            sb.AppendLine($"    Dim CurrentY As Double");
+            sb.AppendLine($"    Dim MaxRowHeight As Double: MaxRowHeight = 0");
+
+            sb.AppendLine($"    CurrentY = PAGE_HEIGHT - MARGIN");
+            sb.AppendLine($"    CurrentX = MARGIN");
+            sb.AppendLine("");
+
+            sb.AppendLine("    For i = LBound(mastersArr) To UBound(mastersArr)");
+            sb.AppendLine("        Set mst = Nothing");
+            sb.AppendLine("        found = False");
+            sb.AppendLine("        Dim mName As String");
+            sb.AppendLine("        mName = mastersArr(i)");
+
+            // 1. Сначала ищем в самом документе (вдруг уже есть)
+            sb.AppendLine("        On Error Resume Next");
+            sb.AppendLine("        Set mst = ActiveDocument.Masters.ItemU(mName)");
+            sb.AppendLine("        On Error GoTo 0");
+
+            // 2. Если не нашли, ищем во ВСЕХ открытых трафаретах
+            sb.AppendLine("        If mst Is Nothing Then");
+            sb.AppendLine("            For Each doc In Application.Documents");
+            sb.AppendLine("                If doc.Type = 2 Then");
+            sb.AppendLine("                    On Error Resume Next");
+            sb.AppendLine("                    Set mst = doc.Masters.ItemU(mName)");
+            sb.AppendLine("                    On Error GoTo 0");
+            sb.AppendLine("                    If Not mst Is Nothing Then Exit For");
+            sb.AppendLine("                End If");
+            sb.AppendLine("            Next doc");
+            sb.AppendLine("        End If");
+
+            // ----------------------------------------------------------------------
+            // DEBUG CODE: Проверка, был ли найден мастер
+            // ----------------------------------------------------------------------
+            sb.AppendLine("        If mst Is Nothing Then");
+            sb.AppendLine("            Debug.Print \"Мастер НЕ НАЙДЕН: \" & mName");
+            sb.AppendLine("        End If");
+            // ----------------------------------------------------------------------
+
+            // 3. Если нашли мастера - рисуем
+            sb.AppendLine("        If Not mst Is Nothing Then");
+            sb.AppendLine("            ' 1. Получаем размеры мастера (Ширина/Высота в дюймах)");
+            sb.AppendLine("            Dim w As Double: w = mst.Cells(\"Width\").Result(visInches)");
+            sb.AppendLine("            Dim h As Double: h = mst.Cells(\"Height\").Result(visInches)");
+            sb.AppendLine("            ");
+            sb.AppendLine("            ' 2. Проверяем, помещается ли фигура в текущей строке:");
+            sb.AppendLine("            If (CurrentX + w + MARGIN) > PAGE_WIDTH Then");
+            sb.AppendLine("                ' Переход на новую строку");
+            sb.AppendLine("                CurrentY = CurrentY - MaxRowHeight - MARGIN");
+            sb.AppendLine("                CurrentX = MARGIN");
+            sb.AppendLine("                MaxRowHeight = 0");
+            sb.AppendLine("            End If");
+            sb.AppendLine("            ");
+            sb.AppendLine("            ' 3. Проверяем, не вышли ли мы за нижний край страницы");
+            sb.AppendLine("            If (CurrentY - h - MARGIN) < 0 Then");
+
+            // ----------------------------------------------------------------------
+            // DEBUG CODE: Сообщение о выходе из-за нехватки места
+            // ----------------------------------------------------------------------
+            sb.AppendLine("                MsgBox \"РИСОВАНИЕ ОСТАНОВЛЕНО: Не хватило места на странице для: \" & mName, vbCritical");
+            // ----------------------------------------------------------------------
+
+            sb.AppendLine("                Exit For");
+            sb.AppendLine("            End If");
+            sb.AppendLine("            ");
+            sb.AppendLine("            ' 4. Обновляем максимальную высоту для текущей строки");
+            sb.AppendLine("            If h > MaxRowHeight Then MaxRowHeight = h");
+            sb.AppendLine("            ");
+            sb.AppendLine("            ' 5. Вычисляем координаты центра фигуры (для метода Drop)");
+            sb.AppendLine("            Dim CenterX As Double: CenterX = CurrentX + w / 2");
+            sb.AppendLine("            Dim CenterY As Double: CenterY = CurrentY - h / 2");
+            sb.AppendLine("            ");
+            sb.AppendLine("            ' 6. Размещаем фигуру");
+            sb.AppendLine("            pg.Drop mst, CenterX, CenterY");
+            sb.AppendLine("            ");
+            sb.AppendLine("            ' 7. Обновляем CurrentX для следующей фигуры");
+            sb.AppendLine("            CurrentX = CurrentX + w + MARGIN");
+            sb.AppendLine("        End If");
+
+            sb.AppendLine("    Next i");
+            sb.AppendLine($"End Sub");
+            // --- КОНЕЦ VBA КОДА ---
+
+            // --- БЕЗОПАСНЫЙ ЗАПУСК И ОЧИСТКА ---
+            Microsoft.Vbe.Interop.VBProject vbProject = null;
+            Microsoft.Vbe.Interop.VBComponent vbComp = null;
+
+            try
+            {
+                vbProject = doc.VBProject;
+                vbComp = vbProject.VBComponents.Add(Microsoft.Vbe.Interop.vbext_ComponentType.vbext_ct_StdModule);
+                vbComp.Name = moduleName;
+
+                vbComp.CodeModule.AddFromString(sb.ToString());
+
+                doc.ExecuteLine($"Draw_{moduleName}");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(
+                    "Ошибка запуска VBA. Проверьте настройки безопасности Visio (доверять доступ к объектной модели проекта VBA).\n\n" +
+                    ex.Message,
+                    "Ошибка VBA", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            finally
+            {
+                if (vbComp != null)
+                {
+                    try { vbProject.VBComponents.Remove(vbComp); } catch { }
+                    ReleaseComObject(vbComp);
+                }
+                if (vbProject != null) ReleaseComObject(vbProject);
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+            }
+        }
+    }
+
+    // Вспомогательный класс для передачи данных
+    public class VisioItem
     {
         public string MasterName { get; set; }
         public double X { get; set; }
@@ -1445,7 +1798,7 @@ namespace ZontSpecExtractor
             }
 
             // В. Запуск макроса
-            VisioVbaRunner.RunDrawingMacro(doc, page, itemsToDraw);
+            VisioVbaRunner.RunDrawingMacro(doc, page, itemsToDraw, AppSettings.SchemeConfig);
         }
 
         /// <summary>
@@ -1485,10 +1838,12 @@ namespace ZontSpecExtractor
         /// Сопоставляет "Наименование" из Excel с ключом Visio Master из MasterMap.
         /// </summary>
         private List<Dictionary<string, string>> PrepareVisioData(
-        List<Dictionary<string, string>> extractedData,
-        List<SearchRule> SearchRules)
+    List<Dictionary<string, string>> extractedData,
+    List<SearchRule> SearchRules)
         {
-            var masterMap = RulesToMap(config.SearchRules);
+            // ИСПРАВЛЕНО: используем аргумент SearchRules вместо несуществующего config.SearchRules
+            var masterMap = RulesToMap(SearchRules);
+
             var visioData = new List<Dictionary<string, string>>();
             int totalItems = extractedData.Count;
             int mappedItems = 0;
@@ -1509,7 +1864,7 @@ namespace ZontSpecExtractor
                 string cleanedContent = content.Trim();
                 bool matched = false;
 
-                // Ищем самое длинное совпадение (для лучшего сопоставления)
+                // Ищем самое длинное совпадение
                 var bestMatch = masterMap.Keys
                     .Where(key => !string.IsNullOrEmpty(key))
                     .OrderByDescending(key => key.Length)
@@ -1562,8 +1917,8 @@ namespace ZontSpecExtractor
         }
 
         private void CreateUnifiedVisioFile(List<Dictionary<string, string>> extractedData,
-                                    VisioConfiguration configMarking,
-                                    VisioConfiguration configScheme)
+                            VisioConfiguration configMarking,
+                            VisioConfiguration configScheme)
         {
             Visio.Application? visioApp = null;
             Visio.Document? newDocument = null;
@@ -1572,12 +1927,13 @@ namespace ZontSpecExtractor
             {
                 UpdateStatus("🔥 Начало генерации объединенного Visio-файла...");
 
-                var markingMap = RulesToMap(configMarking.SearchRules);
-                var schemeMap = RulesToMap(configScheme.SearchRules);
+                // ИСПРАВЛЕНО: 
+                // 1. Убраны лишние вызовы RulesToMap, так как PrepareVisioData делает это внутри.
+                // 2. Передаем extractedData первым параметром.
+                // 3. Передаем конкретные списки правил (configMarking.SearchRules) вторым параметром.
 
-                var markingData = PrepareVisioData(config.SearchRules, markingMap);
-                var schemeData = PrepareVisioData(config.SearchRules, schemeMap);
-
+                var markingData = PrepareVisioData(extractedData, configMarking.SearchRules);
+                var schemeData = PrepareVisioData(extractedData, configScheme.SearchRules);
 
                 // 2. ЗАПУСК VISIO И СОЗДАНИЕ ДОКУМЕНТА
                 visioApp = new Visio.Application();
@@ -1607,9 +1963,6 @@ namespace ZontSpecExtractor
                 }
 
                 UpdateStatus($"✅ Файл Visio успешно сгенерирован и открыт");
-
-                // НЕ ЗАКРЫВАЕМ ДОКУМЕНТ И ПРИЛОЖЕНИЕ - оставляем открытым для пользователя
-
             }
             catch (System.Runtime.InteropServices.COMException ex)
             {
@@ -1623,8 +1976,6 @@ namespace ZontSpecExtractor
             }
             finally
             {
-                // ОСВОБОЖДАЕМ ТОЛЬКО ВРЕМЕННЫЕ ОБЪЕКТЫ, НО НЕ ЗАКРЫВАЕМ ДОКУМЕНТ
-                // Документ и приложение остаются открытыми для пользователя
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
             }
@@ -1732,18 +2083,27 @@ namespace ZontSpecExtractor
                 // =========================================================================
                 // 3. ДОБАВЛЕНИЕ ПРЕДОПРЕДЕЛЕННЫХ ФИГУР (НОВАЯ ЛОГИКА)
                 // =========================================================================
+                // ... внутри PopulateVisioPage ...
+
+                // =========================================================================
+                // 3. ДОБАВЛЕНИЕ ПРЕДОПРЕДЕЛЕННЫХ ФИГУР (НОВАЯ ЛОГИКА)
+                // =========================================================================
                 UpdateStatus($"Добавление {config.PredefinedMasterConfigs.Count} предопределенных фигур...");
 
-                foreach (string predefinedMaster in config.PredefinedMasterConfigs.Where(n => !string.IsNullOrWhiteSpace(n.MasterName)))
+                // ИСПРАВЛЕНО: тип переменной цикла изменен на var (PredefinedMasterConfig)
+                foreach (var pmConfig in config.PredefinedMasterConfigs.Where(n => !string.IsNullOrWhiteSpace(n.MasterName)))
                 {
                     master = null;
                     shape = null;
+
+                    // ИСПРАВЛЕНО: берем имя из объекта конфига
+                    string predefinedMasterName = pmConfig.MasterName;
 
                     // 3.1. Поиск мастера
                     foreach (var stencilDoc in openStencils)
                     {
                         master = stencilDoc.Masters.Cast<Visio.Master>().FirstOrDefault(m =>
-                            m.NameU.Equals(predefinedMaster, StringComparison.Ordinal));
+                            m.NameU.Equals(predefinedMasterName, StringComparison.Ordinal));
 
                         if (master != null) break;
                     }
@@ -1753,8 +2113,9 @@ namespace ZontSpecExtractor
                         try
                         {
                             // 3.2. Добавление фигуры
+                            // Здесь можно использовать координаты из конфига, если они есть, но пока оставим вашу логику currentX/Y
                             shape = page.Drop(master, currentX, currentY);
-                            shape.Text = $"Предопределенная: {predefinedMaster}";
+                            shape.Text = $"Предопределенная: {predefinedMasterName}";
 
                             // Логика смещения
                             currentX += 1.0;
@@ -1764,19 +2125,19 @@ namespace ZontSpecExtractor
                                 currentY += 1.0;
                             }
 
-                            UpdateStatus($"  ✅ Добавлена предопределенная фигура: '{predefinedMaster}'");
+                            UpdateStatus($"  ✅ Добавлена предопределенная фигура: '{predefinedMasterName}'");
                         }
                         catch (Exception ex)
                         {
-                            UpdateStatus($"❌ Ошибка размещения предопределенного мастера '{predefinedMaster}': {ex.Message}");
+                            UpdateStatus($"❌ Ошибка размещения предопределенного мастера '{predefinedMasterName}': {ex.Message}");
                         }
                     }
                     else
                     {
                         // Если предопределенный мастер не найден
-                        if (!mastersNotFound.Contains(predefinedMaster))
+                        if (!mastersNotFound.Contains(predefinedMasterName))
                         {
-                            mastersNotFound.Add(predefinedMaster);
+                            mastersNotFound.Add(predefinedMasterName);
                         }
                     }
 
