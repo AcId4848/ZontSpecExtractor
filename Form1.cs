@@ -221,6 +221,8 @@ namespace ZontSpecExtractor
         }
     }
 
+
+
     // =========================================================================
     // 2. ФОРМА ОБЩИХ НАСТРОЕК (GeneralSettingsForm)
     // =========================================================================
@@ -998,19 +1000,17 @@ namespace ZontSpecExtractor
         }
     }
 
-    public record RawExcelHit
+    public class RawExcelHit
     {
-        public string SheetName { get; set; } = "";
-        public string FullItemName { get; set; } = ""; // ДОСЛОВНОЕ содержание ячейки
-        public string SearchTerm { get; set; } = "";   // Искомое слово (для Visio)
-        public bool ConditionMet { get; set; } = false; // Условие с числом выполнено
-        public int Quantity { get; set; } = 1;         // Количество (число или 1)
-        public bool IsLimited { get; set; } = false;   // Флаг "Ограниченное кол-во"
+        public string SheetName { get; set; }
+        public string FullItemName { get; set; } // Сюда теперь попадет "Насос ГВС", а не просто "Насос"
+        public string SearchTerm { get; set; }
+        public bool ConditionMet { get; set; }
+        public int Quantity { get; set; }
+        public bool IsLimited { get; set; }
 
         public SearchRule FoundRule { get; set; }
-
-        // ВАЖНОЕ ПОЛЕ: Сюда записываем имя мастера, которое мы вычислили при разборе строки
-        public string TargetMasterName { get; set; }
+        public string TargetMasterName { get; set; } // <-- Для вывода в таблицу (Visio Name)
     }
 
 
@@ -1185,6 +1185,25 @@ namespace ZontSpecExtractor
                 sum += (c - 'A' + 1);
             }
             return sum;
+        }
+
+        private Dictionary<string, EquipmentItem> _equipmentConfig = new Dictionary<string, EquipmentItem>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Пример заполнения (это можно вынести в JSON или отдельный config-файл позже)
+            { "Реле 12/220 16A", new EquipmentItem { ShortName = "Реле 12В", PositionCode = "K1", ShapeMasterName = "Relay_12V" } },
+            { "Автомат 16А", new EquipmentItem { ShortName = "Авт. 16А", PositionCode = "QF1", ShapeMasterName = "CircuitBreaker" } },
+            // Добавьте сюда остальные позиции из вашего ТЗ
+        };
+
+        public class EquipmentItem
+        {
+            public string OriginalName { get; set; } // Имя из Excel (для поиска)
+            public string ShortName { get; set; }    // Короткое имя для схемы (из настроек)
+            public string PositionCode { get; set; } // Код позиции (например, "QF1", "K1")
+            public int Quantity { get; set; }        // Количество
+            public string ShapeMasterName { get; set; } // Имя мастера в стенсиле Visio
+
+            // Дополнительные данные, если нужно (ток, напряжение и т.д.)
         }
 
         private string GetColumnName(int columnIndex)
@@ -2098,17 +2117,15 @@ namespace ZontSpecExtractor
         {
             var rawHits = new List<RawExcelHit>();
 
-            // Настройка контекста лицензии (на всякий случай)
+            // Лицензия EPPlus
             OfficeOpenXml.ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
 
             try
             {
                 using (var package = new ExcelPackage(new FileInfo(filePath)))
                 {
-                    // Берем имена листов, которые нужно сканировать (из настроек)
+                    // Определяем листы для поиска
                     var targetSheets = AppSettings.SearchConfig.TargetSheetNames;
-
-                    // Если список пуст, берем все листы
                     if (targetSheets == null || !targetSheets.Any())
                     {
                         targetSheets = package.Workbook.Worksheets.Select(w => w.Name).ToList();
@@ -2117,123 +2134,155 @@ namespace ZontSpecExtractor
                     foreach (var sheetName in targetSheets)
                     {
                         var ws = package.Workbook.Worksheets[sheetName];
-                        if (ws == null) continue;
-
-                        if (ws.Dimension == null) continue; // Пустой лист
+                        if (ws == null || ws.Dimension == null) continue;
 
                         int startRow = ws.Dimension.Start.Row;
                         int endRow = ws.Dimension.End.Row;
 
-                        // Проходим по строкам
+                        // --- ЦИКЛ ПО СТРОКАМ EXCEL ---
                         for (int row = startRow; row <= endRow; row++)
                         {
-                            // Проходим по каждому правилу
+                            // --- ЦИКЛ ПО ПРАВИЛАМ ПОИСКА ---
                             foreach (var rule in AppSettings.SearchConfig.Rules)
                             {
-                                // --- 1. РАЗБОР СТРОКИ ПРАВИЛА (парсим =, ;) ---
-                                string effectiveSearchTerms = rule.ExcelValue;       // Что ищем
-                                string effectiveMasterName = rule.VisioMasterName;  // Что вставляем
-                                string effectiveColumn = rule.SearchColumn;     // Где ищем
+                                // =========================================================
+                                // ЭТАП 0: ПРОВЕРКА ДОПОЛНИТЕЛЬНОГО УСЛОВИЯ (Condition)
+                                // =========================================================
+                                // Если галочка UseCondition стоит, мы проверяем соседнюю ячейку.
+                                // Например: Колонка "L" должна быть равна "1".
 
-                                // Поддержка синтаксиса "Слово = Мастер" или "Слово = Колонка = Мастер"
+                                if (rule.UseCondition)
+                                {
+                                    // Превращаем букву колонки (например "L") в номер (12)
+                                    int condColIndex = ExcelColumnLetterToNumber(rule.ConditionColumn);
+
+                                    if (condColIndex > 0)
+                                    {
+                                        // Читаем значение из ячейки условия
+                                        string actualValue = ws.Cells[row, condColIndex].Text?.Trim();
+
+                                        // Сравниваем с требуемым значением (ConditionValue)
+                                        // Используем OrdinalIgnoreCase, чтобы "1" и "1 " или "да" и "ДА" совпадали
+                                        bool isConditionMet = string.Equals(actualValue, rule.ConditionValue, StringComparison.OrdinalIgnoreCase);
+
+                                        // ЕСЛИ УСЛОВИЕ НЕ ВЫПОЛНЕНО -> ПРОПУСКАЕМ ПРАВИЛО
+                                        if (!isConditionMet)
+                                        {
+                                            continue;
+                                        }
+                                    }
+                                }
+
+                                // =========================================================
+                                // ЭТАП 1: РАЗБОР СТРОКИ ПРАВИЛА (Search Logic)
+                                // =========================================================
+                                string effectiveSearchTerms = rule.ExcelValue;
+                                string effectiveMasterName = rule.VisioMasterName;
+                                string effectiveColumn = rule.SearchColumn;
+
+                                // Логика "=" (Слово = Мастер ИЛИ Слово = Колонка = Мастер)
                                 if (!string.IsNullOrEmpty(effectiveSearchTerms) && effectiveSearchTerms.Contains("="))
                                 {
                                     var parts = effectiveSearchTerms.Split('=');
                                     if (parts.Length == 2)
                                     {
-                                        // Формат: "Насос; Pump = PumpMaster"
                                         effectiveSearchTerms = parts[0].Trim();
                                         effectiveMasterName = parts[1].Trim();
                                     }
                                     else if (parts.Length == 3)
                                     {
-                                        // Формат: "H1000 = V = ZontMaster"
                                         effectiveSearchTerms = parts[0].Trim();
                                         effectiveColumn = parts[1].Trim();
                                         effectiveMasterName = parts[2].Trim();
                                     }
                                 }
 
-                                // --- 2. ОПРЕДЕЛЕНИЕ КОЛОНКИ ---
-                                // Если колонка не задана ни в настройках, ни в строке - пропускаем правило
-                                if (string.IsNullOrWhiteSpace(effectiveColumn)) continue;
+                                // =========================================================
+                                // ЭТАП 2: ОПРЕДЕЛЕНИЕ ГДЕ ИСКАТЬ (Колонка или Весь ряд)
+                                // =========================================================
+                                string cellTextToSearch = "";
 
-                                int searchColIndex = ExcelColumnLetterToNumber(effectiveColumn);
-                                if (searchColIndex <= 0) continue; // Некорректная колонка
+                                if (!string.IsNullOrWhiteSpace(effectiveColumn))
+                                {
+                                    // Если колонка задана (например "V"), берем текст строго оттуда
+                                    int colIndex = ExcelColumnLetterToNumber(effectiveColumn);
+                                    if (colIndex > 0)
+                                    {
+                                        cellTextToSearch = ws.Cells[row, colIndex].Text?.Trim();
+                                    }
+                                }
+                                else
+                                {
+                                    // Если колонка НЕ задана, склеиваем первые 20 ячеек строки для поиска
+                                    StringBuilder sb = new StringBuilder();
+                                    for (int c = 1; c <= 20; c++) // Ограничиваемся 20 колонками для скорости
+                                    {
+                                        var txt = ws.Cells[row, c].Text?.Trim();
+                                        if (!string.IsNullOrEmpty(txt)) sb.Append(txt + " ");
+                                    }
+                                    cellTextToSearch = sb.ToString().Trim();
+                                }
 
-                                // --- 3. ЧТЕНИЕ ЯЧЕЙКИ ---
-                                string cellText = ws.Cells[row, searchColIndex].Text?.Trim();
-                                if (string.IsNullOrEmpty(cellText)) continue;
+                                if (string.IsNullOrEmpty(cellTextToSearch)) continue;
 
-                                // --- 4. ПРОВЕРКА СОВПАДЕНИЯ (Синонимы) ---
-                                var searchKeywords = effectiveSearchTerms.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+                                // =========================================================
+                                // ЭТАП 3: ПОИСК СОВПАДЕНИЙ (Синонимы ; )
+                                // =========================================================
+                                var searchKeywords = effectiveSearchTerms.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
                                 var masterNames = effectiveMasterName.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
 
                                 int matchIndex = -1;
+                                string foundRealName = "";
+
                                 for (int i = 0; i < searchKeywords.Length; i++)
                                 {
-                                    // Сравниваем текст ячейки с ключевым словом
-                                    if (searchKeywords[i].Trim().Equals(cellText, StringComparison.OrdinalIgnoreCase))
+                                    string key = searchKeywords[i].Trim();
+                                    if (string.IsNullOrEmpty(key)) continue;
+
+                                    // Ищем вхождение (Contains)
+                                    if (cellTextToSearch.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0)
                                     {
                                         matchIndex = i;
+                                        foundRealName = cellTextToSearch; // Сохраняем полный текст для таблицы
                                         break;
                                     }
                                 }
 
-                                // Если нашли совпадение
+                                // =========================================================
+                                // ЭТАП 4: ЕСЛИ НАШЛИ -> СОХРАНЯЕМ
+                                // =========================================================
                                 if (matchIndex >= 0)
                                 {
-                                    // --- 5. ВЫБОР МАСТЕРА ---
+                                    // Определяем мастера
                                     string targetMaster = "";
                                     if (masterNames.Length > 0)
                                     {
-                                        // Если мастеров несколько (Слово1;Слово2 = Мастер1;Мастер2), берем соответствующий
                                         if (matchIndex < masterNames.Length)
                                             targetMaster = masterNames[matchIndex].Trim();
                                         else
-                                            targetMaster = masterNames[0].Trim(); // Fallback на первый
+                                            targetMaster = masterNames[0].Trim();
                                     }
 
-                                    // --- 6. ПРОВЕРКА ДОП. УСЛОВИЯ (Legacy) ---
-                                    // Оставляем вашу старую логику проверки ConditionColumn, если она нужна
-                                    if (rule.UseCondition)
-                                    {
-                                        int condColIndex = ExcelColumnLetterToNumber(rule.ConditionColumn);
-                                        if (condColIndex > 0)
-                                        {
-                                            string condVal = ws.Cells[row, condColIndex].Text.Trim();
-                                            // Если условие не совпадает - пропускаем
-                                            if (!condVal.Equals(rule.ConditionValue, StringComparison.OrdinalIgnoreCase))
-                                                continue;
-                                        }
-                                    }
-
-                                    // --- 7. ПОИСК КОЛИЧЕСТВА ---
+                                    // Определяем количество (Попытка найти цифру в колонке "Кол-во" или просто 1)
                                     int quantity = 1;
-                                    // Пробуем найти колонку "Количество" или "Кол-во" в заголовке (простая эвристика) или фиксированную
-                                    // В вашем коде была сложная логика поиска кол-ва, упростим для надежности:
-                                    // Если вы знаете колонку количества, лучше добавьте её в настройки. 
-                                    // Пока оставим 1 или попробуем найти в соседних колонках, если нужно.
+                                    // TODO: Если нужно читать кол-во из Excel, добавьте логику здесь.
+                                    // Например: int qtyCol = ExcelColumnLetterToNumber("E"); 
+                                    // int.TryParse(ws.Cells[row, qtyCol].Text, out quantity);
 
-                                    // Пример поиска количества в фиксированной колонке (например, следующая после найденной)
-                                    // int qtyCol = searchColIndex + 1; 
-                                    // if (int.TryParse(ws.Cells[row, qtyCol].Text, out int q)) quantity = q;
-
-                                    // --- 8. ДОБАВЛЕНИЕ РЕЗУЛЬТАТА ---
+                                    // Добавляем результат
                                     rawHits.Add(new RawExcelHit
                                     {
                                         SheetName = sheetName,
-                                        FullItemName = cellText,
-                                        SearchTerm = cellText, // Сохраняем реальное найденное слово
-                                        ConditionMet = true,
+                                        FullItemName = foundRealName,
+                                        SearchTerm = searchKeywords[matchIndex],
+                                        ConditionMet = true, // Мы это проверили на Этапе 0
                                         Quantity = quantity,
                                         IsLimited = rule.LimitQuantity,
-                                        FoundRule = rule,                 // Важно
-                                        TargetMasterName = targetMaster   // Важно: найденный мастер
+                                        FoundRule = rule,
+                                        TargetMasterName = targetMaster
                                     });
 
-                                    // Если нашли правило для этой строки - идем к следующей строке (break),
-                                    // чтобы не добавлять дубликаты. Уберите break, если хотите несколько фигур на одну ячейку.
+                                    // Прерываем цикл правил для этой строки, чтобы не дублировать
                                     break;
                                 }
                             }
@@ -2681,8 +2730,7 @@ namespace ZontSpecExtractor
                     if (string.IsNullOrWhiteSpace(fixedItem.MasterName)) continue;
 
                     double x = 0, y = 0;
-                    // Парсим с заменой точки и запятой для надежности
-                    var coords = fixedItem.CoordinatesXY?.Split(',');
+                    var coords = fixedItem.CoordinatesXY?.Split(new[] { ',', ';' });
                     if (coords != null && coords.Length >= 2)
                     {
                         double.TryParse(coords[0].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out x);
@@ -2691,12 +2739,11 @@ namespace ZontSpecExtractor
 
                     for (int i = 0; i < fixedItem.Quantity; i++)
                     {
-                        // ИСПРАВЛЕНО 2: Сначала бросаем в (0,0), чтобы Visio не применил дюймы к координатам
+                        // Сначала бросаем в (0,0)
                         Visio.Shape shp = DropShapeOnPage(page, fixedItem.MasterName, 0, 0, 1, true);
 
                         if (shp != null)
                         {
-                            // Теперь двигаем в нужную точку с учетом Anchor
                             string anchor = !string.IsNullOrWhiteSpace(fixedItem.Anchor) ? fixedItem.Anchor : "Center";
                             SetShapePosition(shp, x, y, anchor);
                         }
@@ -2707,9 +2754,8 @@ namespace ZontSpecExtractor
             // --- 2. НАЙДЕННЫЕ ФИГУРЫ (Sequential / Поток) ---
             if (config.SequentialDrawing.Enabled && hits != null && hits.Any())
             {
-                // Читаем старт
                 double startX = 10, startY = 200;
-                var sCoords = config.SequentialDrawing.StartCoordinatesXY?.Split(',');
+                var sCoords = config.SequentialDrawing.StartCoordinatesXY?.Split(new[] { ',', ';' });
                 if (sCoords != null && sCoords.Length >= 2)
                 {
                     double.TryParse(sCoords[0].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out startX);
@@ -2723,18 +2769,14 @@ namespace ZontSpecExtractor
                 double vGap = config.SequentialDrawing.VerticalStepMM;
                 double rowMaxH = 0;
 
-                // ИСПРАВЛЕНО 3: Подготовка данных с защитой от null (Fallback)
-                // Если FoundRule заполнено (новый код) - используем его.
-                // Если FoundRule == null (старый код сканирования) - ищем правило по слову сейчас.
-
+                // ГРУППИРОВКА ПО МАСТЕРУ
+                // Используем TargetMasterName, чтобы разные слова могли вести к разным (или одинаковым) фигурам
                 var groupedHits = hits
-                    .Where(h => h.ConditionMet) // Фильтр условий
+                    .Where(h => h.ConditionMet)
                     .GroupBy(h => new
                     {
-                        // Группируем по уникальной паре: Правило + ИмяМастера
-                        // Это позволяет разным синонимам ссылаться на одну фигуру (группируются вместе)
-                        // Или разным синонимам ссылаться на разные фигуры (группируются раздельно)
                         Rule = h.FoundRule,
+                        // Если TargetMasterName определен (новый код), используем его. Иначе fallback.
                         MasterName = !string.IsNullOrEmpty(h.TargetMasterName) ? h.TargetMasterName :
                                      (h.FoundRule != null ? h.FoundRule.VisioMasterName : h.SearchTerm)
                     });
@@ -2747,13 +2789,10 @@ namespace ZontSpecExtractor
                     if (string.IsNullOrWhiteSpace(masterName)) continue;
 
                     // Считаем количество
-                    // Если LimitQuantity = true, рисуем 1 раз, иначе сумму
                     int countToDraw = (rule != null && rule.LimitQuantity) ? 1 : group.Sum(h => h.Quantity);
 
                     for (int i = 0; i < countToDraw; i++)
                     {
-                        // ВЫЗОВ ВАШЕГО МЕТОДА ОТРИСОВКИ
-                        // (убедитесь, что DropShapeOnPage возвращает Shape и принимает правильные аргументы)
                         Visio.Shape shp = DropShapeOnPage(page, masterName, 0, 0, 1, true);
 
                         if (shp != null)
@@ -2761,42 +2800,43 @@ namespace ZontSpecExtractor
                             double wMM = shp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
                             double hMM = shp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
 
-                            // Проверка переноса строки
-                            // (Логика: если текущая позиция + ширина фигуры вылазит за предел)
+                            // Перенос строки
                             if ((curX + wMM - startX) > maxW)
                             {
                                 curX = startX;
-                                curY -= (rowMaxH + vGap); // Сдвиг вниз
+                                curY -= (rowMaxH + vGap);
                                 rowMaxH = 0;
                             }
 
-                            // Определяем якорь для потока (обычно TopLeft или Center)
                             string anchor = !string.IsNullOrWhiteSpace(rule.Anchor) ? rule.Anchor : config.SequentialDrawing.Anchor;
                             if (string.IsNullOrWhiteSpace(anchor)) anchor = "Center";
 
-                            // Позиционируем фигуру в текущую точку (curX, curY)
-                            // Важно: мы считаем (curX, curY) как точку привязки. 
                             SetShapePosition(shp, curX, curY, anchor);
 
-                            // Сдвигаем курсор вправо
-                            // Тут можно настроить логику. Самый простой вариант:
-                            // Двигаем курсор на ширину фигуры + отступ.
-
-                            // Если якорь был Center, то curX был центром фигуры.
-                            // Если мы хотим, чтобы следующая фигура не налезла, нужно добавить половину ширины этой + половину следующей (сложно).
-
-                            // УПРОЩЕНИЕ ДЛЯ ПОТОКА: 
-                            // Чтобы поток был ровным, лучше считать curX всегда "левым краем" слота, 
-                            // а SetShapePosition использовать только для смещения самой фигуры внутри этого слота.
-                            // Но если оставить как есть, то:
-
                             curX += wMM + hGap;
-
                             if (hMM > rowMaxH) rowMaxH = hMM;
                         }
                     }
                 }
             }
+
+            // --- 3. ОЧИСТКА ПУСТЫХ СТРАНИЦ ---
+            // Удаляем стандартную "Страница-1", если она пустая и мы создали другие страницы
+            try
+            {
+                if (doc.Pages.Count > 1)
+                {
+                    // Visio нумерует страницы с 1
+                    var firstPage = doc.Pages[1];
+                    // Проверка имен на разных языках
+                    if ((firstPage.Name.StartsWith("Page") || firstPage.Name.StartsWith("Страница"))
+                        && firstPage.Shapes.Count == 0)
+                    {
+                        firstPage.Delete(0);
+                    }
+                }
+            }
+            catch { /* Ошибка удаления игнорируется */ }
         }
 
         private void SetShapePosition(Visio.Shape shape, double xMM, double yMM, string anchor)
@@ -3554,7 +3594,103 @@ namespace ZontSpecExtractor
 
             return masterToUse;
         }
+
+        // --- ВСТАВИТЬ ПЕРЕД КОНЦОМ КЛАССА FORM1 ---
+
+        // 1. Функция чтения Excel и превращения его в список объектов
+        private List<EquipmentItem> ParseExcelData(ExcelWorksheet sheet)
+        {
+            var foundEquipment = new List<EquipmentItem>();
+
+            // ВАЖНО: Проверьте номера строк и колонок под ваш файл!
+            int startRow = 10; // С какой строки начинаются данные
+            int endRow = sheet.Dimension?.End.Row ?? 100;
+
+            for (int row = startRow; row <= endRow; row++)
+            {
+                // Предположим, наименование в 1-й колонке, кол-во в 5-й (поправьте индексы!)
+                string excelName = sheet.Cells[row, 1].Text.Trim();
+                string qtyText = sheet.Cells[row, 5].Text.Trim();
+
+                if (string.IsNullOrEmpty(excelName)) continue;
+
+                // Ищем совпадение в нашем словаре настроек
+                if (_equipmentConfig.TryGetValue(excelName, out EquipmentItem configItem))
+                {
+                    int.TryParse(qtyText, out int qty);
+                    if (qty > 0)
+                    {
+                        // Создаем копию объекта с реальным количеством
+                        foundEquipment.Add(new EquipmentItem
+                        {
+                            OriginalName = excelName,
+                            ShortName = configItem.ShortName,
+                            // ИСПРАВЛЕНО: Сначала закрываем скобку Count(...), а потом прибавляем + 1
+                            PositionCode = configItem.PositionCode + (foundEquipment.Count(x => x.PositionCode != null && x.PositionCode.StartsWith(configItem.PositionCode)) + 1),
+                            ShapeMasterName = configItem.ShapeMasterName,
+                            Quantity = qty
+                        });
+                    }
+                }
+            }
+            return foundEquipment;
+        }
+
+        // 2. Функция записи данных внутрь фигуры Visio (Shape Data)
+        private void UpdateVisioShapeData(Visio.Shape shape, EquipmentItem item)
+        {
+            try
+            {
+                // Пишем текст на фигуре
+                shape.Text = $"{item.PositionCode}\n{item.ShortName}";
+
+                // Проверяем наличие секции свойств
+                if (shape.get_SectionExists((short)Visio.VisSectionIndices.visSectionProp, 0) == 0)
+                    shape.AddSection((short)Visio.VisSectionIndices.visSectionProp);
+
+                // Записываем скрытые данные (для отчетов Visio)
+                SetShapeProperty(shape, "ShortName", "Наименование", item.ShortName);
+                SetShapeProperty(shape, "Position", "Позиция", item.PositionCode);
+                SetShapeProperty(shape, "Quantity", "Кол-во", item.Quantity.ToString());
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Ошибка обновления фигуры: " + ex.Message); }
+        }
+
+        // 3. Вспомогательная функция для свойств
+        private void SetShapeProperty(Visio.Shape shape, string propName, string label, string value)
+        {
+            string cellName = "Prop." + propName;
+            if (shape.get_CellExists(cellName, (short)Visio.VisExistsFlags.visExistsAnywhere) == 0)
+                shape.AddNamedRow((short)Visio.VisSectionIndices.visSectionProp, propName, (short)Visio.VisRowTags.visTagDefault);
+
+            shape.CellsU[cellName].FormulaU = "\"" + value + "\"";
+            shape.CellsU[cellName + ".Label"].FormulaU = "\"" + label + "\"";
+        }
+
+        // 4. Функция рисования ТАБЛИЦЫ
+        private void DrawSpecificationTable(Visio.Page page, List<EquipmentItem> items)
+        {
+            double x = 1.0; // Отступ слева (дюймы)
+            double y = 10.0; // Отступ сверху (дюймы, Visio считает от нижнего края, поэтому 10 - это высоко)
+            double rowHeight = 0.25;
+
+            // Заголовки
+            page.DrawRectangle(x, y, x + 0.5, y + rowHeight).Text = "Поз.";
+            page.DrawRectangle(x + 0.5, y, x + 2.5, y + rowHeight).Text = "Наименование";
+            page.DrawRectangle(x + 2.5, y, x + 3.0, y + rowHeight).Text = "Кол.";
+
+            y -= rowHeight;
+
+            foreach (var item in items)
+            {
+                page.DrawRectangle(x, y, x + 0.5, y + rowHeight).Text = item.PositionCode;
+                page.DrawRectangle(x + 0.5, y, x + 2.5, y + rowHeight).Text = item.ShortName;
+                page.DrawRectangle(x + 2.5, y, x + 3.0, y + rowHeight).Text = item.Quantity.ToString();
+                y -= rowHeight;
+            }
+        }
     }
+
 
 
     // =========================================================================
