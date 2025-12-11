@@ -477,39 +477,27 @@ namespace ZontSpecExtractor
             public int Quantity { get; set; } = 1;
             public string Anchor { get; set; } = "Center";
 
+            // --- ИСПРАВЛЕНИЕ: Добавляем хранение размеров ---
+            public double Width { get; set; } = 30.0;
+            public double Height { get; set; } = 15.0;
+            // ------------------------------------------------
+
             public PredefinedViewModel() { }
             public PredefinedViewModel(PredefinedMasterConfig cfg)
             {
                 MasterName = cfg.MasterName;
                 Quantity = cfg.Quantity;
 
-                // НОВОЕ, БОЛЕЕ НАДЕЖНОЕ ИСПРАВЛЕНИЕ для DataGridViewComboBoxCell:
-                // 1. Обрезаем пробелы с краев (убираем "Center " -> "Center").
-                // 2. Нормализуем регистр, чтобы избежать ошибки, если в JSON записано "center".
-                string cleanedAnchor = cfg.Anchor?.Trim();
+                // Сохраняем реальные размеры из конфига
+                Width = cfg.Width;
+                Height = cfg.Height;
 
-                if (string.IsNullOrWhiteSpace(cleanedAnchor))
-                {
-                    Anchor = "Center";
-                }
-                else if (cleanedAnchor.Equals("Center", StringComparison.OrdinalIgnoreCase))
-                {
-                    Anchor = "Center"; // Присваиваем каноничное значение
-                }
-                else if (cleanedAnchor.Equals("TopLeft", StringComparison.OrdinalIgnoreCase))
-                {
-                    Anchor = "TopLeft"; // Присваиваем каноничное значение
-                }
-                else if (cleanedAnchor.Equals("BottomLeft", StringComparison.OrdinalIgnoreCase))
-                {
-                    Anchor = "BottomLeft"; // Присваиваем каноничное значение
-                }
-                else
-                {
-                    // Если значение не соответствует ни одному из допустимых, ставим дефолт.
-                    Anchor = "Center";
-                }
-                // -----------------------------------------------------------------
+                string cleanedAnchor = cfg.Anchor?.Trim();
+                if (string.IsNullOrWhiteSpace(cleanedAnchor)) Anchor = "Center";
+                else if (cleanedAnchor.Equals("Center", StringComparison.OrdinalIgnoreCase)) Anchor = "Center";
+                else if (cleanedAnchor.Equals("TopLeft", StringComparison.OrdinalIgnoreCase)) Anchor = "TopLeft";
+                else if (cleanedAnchor.Equals("BottomLeft", StringComparison.OrdinalIgnoreCase)) Anchor = "BottomLeft";
+                else Anchor = "Center";
 
                 var parts = cfg.CoordinatesXY?.Split(',');
                 if (parts != null && parts.Length >= 2)
@@ -519,6 +507,7 @@ namespace ZontSpecExtractor
                 }
                 else { X = "0"; Y = "0"; }
             }
+
             public PredefinedMasterConfig ToConfig()
             {
                 return new PredefinedMasterConfig
@@ -526,7 +515,11 @@ namespace ZontSpecExtractor
                     MasterName = MasterName,
                     Quantity = Quantity,
                     CoordinatesXY = $"{X},{Y}",
-                    Anchor = Anchor
+                    Anchor = Anchor,
+                    // --- ИСПРАВЛЕНИЕ: Возвращаем сохраненные размеры обратно в конфиг ---
+                    Width = Width,
+                    Height = Height
+                    // --------------------------------------------------------------------
                 };
             }
         }
@@ -1491,7 +1484,6 @@ namespace ZontSpecExtractor
                     );
                 }
 
-                // 1. РИСУЕМ ФИКСИРОВАННЫЕ ФИГУРЫ (СИНИЕ)
                 if (FixedShapes != null)
                 {
                     using (var brush = new SolidBrush(Color.FromArgb(80, 0, 0, 255)))
@@ -1502,46 +1494,58 @@ namespace ZontSpecExtractor
                             if (string.IsNullOrWhiteSpace(shape.CoordinatesXY)) continue;
                             var parts = shape.CoordinatesXY.Split(',');
 
-                            // === ИСПРАВЛЕНИЕ ОШИБКИ FormatException ===
+                            // === БЕЗОПАСНЫЙ ПАРСИНГ (Ваш фикс) ===
                             float xVal = 0, yVal = 0;
-                            // Пытаемся безопасно разобрать обе части
                             bool xOk = parts.Length >= 1 && float.TryParse(parts[0].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out xVal);
                             bool yOk = parts.Length >= 2 && float.TryParse(parts[1].Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out yVal);
 
-                            if (!xOk || !yOk)
-                            {
-                                continue; // Пропускаем фигуру с неверными координатами
-                            }
-                            // ===========================================
+                            if (!xOk || !yOk) continue;
+                            // =====================================
 
-                            // Реальный размер, или дефолт 30x15 мм, если размер < 1 мм
+                            // Размеры (дефолт если < 1)
                             float w = (float)(shape.Width < 1 ? 30 : shape.Width);
                             float h = (float)(shape.Height < 1 ? 15 : shape.Height);
 
+                            // Переводим координаты MM -> Пиксели экрана
                             var pt = ToScreen(xVal, yVal);
 
-                            // Рассчитываем прямоугольник от точки привязки
                             float rectX, rectY;
+                            // Нормализуем Anchor (убираем пробелы, null check)
+                            string anchor = (shape.Anchor ?? "Center").Trim();
 
-                            // По умолчанию считаем Pin центром для визуализации
-                            rectX = pt.X - (w * scale) / 2;
-                            rectY = pt.Y - (h * scale) / 2;
-
-                            // Уточняем для TopLeft (если PinX=0, PinY=Height)
-                            if (shape.Anchor == "TopLeft")
+                            // === ЛОГИКА ОТРИСОВКИ (ИСПРАВЛЕННАЯ) ===
+                            if (string.Equals(anchor, "TopLeft", StringComparison.OrdinalIgnoreCase))
                             {
+                                // Точка привязки = Левый ВЕРХНИЙ угол.
+                                // В GDI+ Y растет вниз, поэтому рисуем прямо от точки (pt).
                                 rectX = pt.X;
                                 rectY = pt.Y;
                             }
+                            else if (string.Equals(anchor, "BottomLeft", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // Точка привязки = Левый НИЖНИЙ угол.
+                                // Чтобы прямоугольник стоял НАД точкой, нужно ВЫЧЕСТЬ высоту (подняться вверх по экрану).
+                                rectX = pt.X;
+                                rectY = pt.Y - (h * scale);
+                            }
+                            else // Center и любые другие варианты
+                            {
+                                // Точка привязки = ЦЕНТР фигуры.
+                                rectX = pt.X - (w * scale) / 2;
+                                rectY = pt.Y - (h * scale) / 2;
+                            }
+                            // ========================================
 
                             var rect = new RectangleF(rectX, rectY, w * scale, h * scale);
 
+                            // Рисуем полупрозрачный фон и рамку
                             g.FillRectangle(brush, rect);
                             g.DrawRectangle(pen, rect.X, rect.Y, rect.Width, rect.Height);
 
-                            // Красная точка привязки
+                            // Рисуем красную точку привязки (поверх всего, чтобы проверить точность)
                             g.FillEllipse(Brushes.Red, pt.X - 3, pt.Y - 3, 6, 6);
 
+                            // Подпись имени мастера
                             g.DrawString(shape.MasterName, SystemFonts.DefaultFont, Brushes.Black, rect.X, rect.Y - 12);
                         }
                     }
@@ -2841,61 +2845,59 @@ namespace ZontSpecExtractor
 
         private void SetShapePosition(Visio.Shape shape, double xMM, double yMM, string anchor)
         {
-            // Получаем реальные размеры фигуры в ММ
+            // 1. Получаем размеры в миллиметрах
             double w = shape.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
             double h = shape.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+
+            // --- ЛЕЧЕНИЕ ГЛЮКОВ (Нормализация фигуры) ---
+            // Принудительно ставим Локальный Пин (точку вращения/привязки внутри фигуры) в её ЦЕНТР.
+            // Это исправляет ситуацию, когда "Center ведет себя как TopLeft".
+            if (shape.get_CellExists("LocPinX", 0) != 0)
+                shape.get_CellsU("LocPinX").FormulaU = "Width*0.5";
+            if (shape.get_CellExists("LocPinY", 0) != 0)
+                shape.get_CellsU("LocPinY").FormulaU = "Height*0.5";
+            // -------------------------------------------
 
             double finalX = xMM;
             double finalY = yMM;
 
-            // Рассчитываем центр (PinX, PinY) в зависимости от того,
-            // какую точку (Anchor) указал пользователь как (xMM, yMM).
-            // По умолчанию Visio считает (0,0) левый нижний угол страницы.
-
+            // Приводим к нижнему регистру для надежности
             switch (anchor?.ToLower().Replace("-", "").Trim())
             {
                 case "topleft":
-                    finalX = xMM + (w / 2);
-                    finalY = yMM - (h / 2);
+                    // Если x,y - это Левый-Верхний угол:
+                    // Пин (Центр) должен быть правее на w/2 и ниже на h/2
+                    finalX = xMM + (w / 2.0);
+                    finalY = yMM - (h / 2.0);
                     break;
-                case "topcenter":
-                    finalX = xMM;
-                    finalY = yMM - (h / 2);
-                    break;
-                case "topright":
-                    finalX = xMM - (w / 2);
-                    finalY = yMM - (h / 2);
-                    break;
-                case "middleleft":
-                case "leftcenter":
-                    finalX = xMM + (w / 2);
-                    finalY = yMM;
-                    break;
-                case "middleright":
-                case "rightcenter":
-                    finalX = xMM - (w / 2);
-                    finalY = yMM;
-                    break;
+
                 case "bottomleft":
-                    finalX = xMM + (w / 2);
-                    finalY = yMM + (h / 2);
+                    // Если x,y - это Левый-Нижний угол:
+                    // Пин (Центр) должен быть правее на w/2 и выше на h/2
+                    finalX = xMM + (w / 2.0);
+                    finalY = yMM + (h / 2.0);
                     break;
-                case "bottomcenter":
-                    finalX = xMM;
-                    finalY = yMM + (h / 2);
+
+                case "topright":
+                    finalX = xMM - (w / 2.0);
+                    finalY = yMM - (h / 2.0);
                     break;
+
                 case "bottomright":
-                    finalX = xMM - (w / 2);
-                    finalY = yMM + (h / 2);
+                    finalX = xMM - (w / 2.0);
+                    finalY = yMM + (h / 2.0);
                     break;
+
                 case "center":
                 default:
+                    // Если x,y - это Центр, и мы нормализовали LocPin выше,
+                    // то координаты не меняем.
                     finalX = xMM;
                     finalY = yMM;
                     break;
             }
 
-            // Применяем координаты строго в миллиметрах
+            // Применяем координаты (Visio всегда использует PinX/PinY для позиционирования на листе)
             shape.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters] = finalX;
             shape.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters] = finalY;
         }
