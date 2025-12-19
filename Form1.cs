@@ -20,6 +20,7 @@ using Microsoft.VisualBasic;
 
 namespace ZontSpecExtractor
 {
+
     // =========================================================================
     // 1. КОНФИГУРАЦИЯ И НАСТРОЙКИ (Сохранение состояния)
     // =========================================================================
@@ -27,6 +28,7 @@ namespace ZontSpecExtractor
     // Вне класса VisioConfiguration (но в том же namespace)
     public record PredefinedMasterConfig
     {
+        // === ЭТО ВСТАВИТЬ В НАЧАЛО КЛАССА (ВНЕ МЕТОДОВ) ===
         public string MasterName { get; set; } = "";
         public int Quantity { get; set; } = 1;
         public string CoordinatesXY { get; set; } = ""; // Пример: "10,20"
@@ -66,8 +68,8 @@ namespace ZontSpecExtractor
 
         public SequentialDrawingConfig SequentialDrawing { get; set; } = new SequentialDrawingConfig();
 
-        
-        
+
+
 
         public string PageSize { get; set; } = "A4"; // Например: "A4", "A3"
         public string PageOrientation { get; set; } = "Portrait"; // Или "Landscape"
@@ -110,7 +112,11 @@ namespace ZontSpecExtractor
         public VisioConfiguration() : this(true) { }
     }
 
-
+    public enum DataSourceType
+    {
+        MainFile, // Основная таблица (где ищем "1")
+        AuxFile   // Вторая таблица (спецификация/доп данные)
+    }
 
     public class SearchRule
     {
@@ -138,12 +144,20 @@ namespace ZontSpecExtractor
         public string ConditionColumn { get; set; } = "L";
         public string ConditionValue { get; set; } = "1";
 
+        public string ExcludedRows { get; set; } = ""; // Например: "10, 37, 229-"
+
+        public string TargetColumn { get; set; } = "Position";
+
+        public bool SearchByValue { get; set; } = false; // Галочка "Искать по значению"
+
         // Свойство для совместимости, если где-то используется old-style "Term"
         public string Term
         {
             get => ExcelValue;
             set => ExcelValue = value;
         }
+
+        public DataSourceType ResultSource { get; set; } = DataSourceType.MainFile;
     }
 
 
@@ -151,9 +165,11 @@ namespace ZontSpecExtractor
     public class SearchConfiguration
     {
         public List<string> TargetSheetNames { get; set; } = new List<string> { "1.ТЗ на объект ZONT" };
-
+        public List<string> VisioSourceSheetName { get; set; } = new List<string> { "1.ТЗ на объект ZONT для VISIO" };
         // Заменяем простой список строк на список правил
         public List<SearchRule> Rules { get; set; } = new List<SearchRule>();
+
+        public string AuxFilePath { get; set; } = "";
     }
 
     public static class AppSettings
@@ -272,7 +288,22 @@ namespace ZontSpecExtractor
 
             // Кнопки
             var btnSave = new Button { Text = "Сохранить всё", Width = 150, Height = 35, DialogResult = DialogResult.OK, BackColor = Color.LightGreen };
-            btnSave.Click += BtnSave_Click;
+            btnSave.Click += (s, e) =>
+            {
+                // === ВАЖНОЕ ИСПРАВЛЕНИЕ ===
+                // 1. Принудительно забираем данные из таблицы обратно в конфиг
+                if (_dgvSearchRules.DataSource is System.ComponentModel.BindingList<SearchRule> list)
+                {
+                    AppSettings.SearchConfig.Rules = list.ToList();
+                }
+
+                // 2. Сохраняем настройки
+                AppSettings.Save();
+
+                // Закрываем форму
+                this.DialogResult = DialogResult.OK;
+                this.Close();
+            };
             var btnCancel = new Button { Text = "Отмена", Width = 100, Height = 35, DialogResult = DialogResult.Cancel };
 
             var footer = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
@@ -299,7 +330,7 @@ namespace ZontSpecExtractor
         private TabPage CreateSingleSheetSettingsPage(string title, VisioConfiguration cfg)
         {
             var page = new TabPage(title);
-            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 600 }; // Расширили левую часть
+            var split = new SplitContainer { Dock = DockStyle.Fill, Orientation = Orientation.Vertical, SplitterDistance = 600 };
 
             // --- ЛЕВАЯ ЧАСТЬ: НАСТРОЙКИ ---
             var leftPanel = new Panel { Dock = DockStyle.Fill, Padding = new Padding(5) };
@@ -318,75 +349,81 @@ namespace ZontSpecExtractor
             topPanel.Controls.Add(btnOrient); btnOrient.Location = new Point(240, 5);
             leftPanel.Controls.Add(topPanel);
 
-            // 2. Группа: Найденные фигуры (Sequential) - НОВОЕ ОКНО
-            var grpSeq = new GroupBox { Text = "Настройки для НАЙДЕННЫХ фигур (поток)", Dock = DockStyle.Top, Height = 140 };
-            var flowSeq = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
+            // 2. Группа: Найденные фигуры (Sequential)
+            var grpSeq = new GroupBox { Text = "Настройки размещения (Змейка/Список)", Dock = DockStyle.Top, Height = 140 }; // Высоту можно подстроить
+            var flowSeq = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, AutoScroll = true };
 
-            // Поля ввода
             var txtStart = new TextBox { Text = cfg.SequentialDrawing.StartCoordinatesXY, Width = 80 };
+            var numMaxW = new NumericUpDown { Minimum = 0, Maximum = 1000, Value = (decimal)cfg.SequentialDrawing.MaxLineWidthMM, Width = 60 };
+            var numVGap = new NumericUpDown { Minimum = 0, Maximum = 100, Value = (decimal)cfg.SequentialDrawing.VerticalStepMM, Width = 60 };
+            var numHGap = new NumericUpDown { Minimum = 0, Maximum = 100, Value = (decimal)cfg.SequentialDrawing.HorizontalStepMM, Width = 60 };
 
-            // ИСПРАВЛЕНИЕ: Устанавливаем Minimum и Maximum перед Value
-            var numMaxW = new NumericUpDown
-            {
-                Minimum = 0,
-                Maximum = 1000,
-                Value = (decimal)cfg.SequentialDrawing.MaxLineWidthMM,
-                Width = 60
-            };
-            var numVGap = new NumericUpDown
-            {
-                Minimum = 0,
-                Maximum = 100,
-                Value = (decimal)cfg.SequentialDrawing.VerticalStepMM,
-                Width = 60
-            };
-            var numHGap = new NumericUpDown
-            {
-                Minimum = 0,
-                Maximum = 100,
-                Value = (decimal)cfg.SequentialDrawing.HorizontalStepMM,
-                Width = 60
-            };
+            // Галочка включения
+            var chkEn = new CheckBox { Text = "Включить", Checked = cfg.SequentialDrawing.Enabled, AutoSize = true };
 
-            var chkEn = new CheckBox { Text = "Включить", Checked = cfg.SequentialDrawing.Enabled, Width = 80 };
+            // --- НОВОЕ: ГЛОБАЛЬНЫЙ ЯКОРЬ ---
+            var lblAnchor = new Label { Text = "Якорь:", AutoSize = true, Padding = new Padding(0, 5, 0, 0) };
+            var cbAnchor = new ComboBox { Width = 100, DropDownStyle = ComboBoxStyle.DropDownList };
+            // Добавляем основные варианты (как вы просили: 3 вида, но можно и больше)
+            cbAnchor.Items.AddRange(new object[] { "TopLeft", "Center", "BottomLeft" });
 
-            // Добавляем контролы с подписями
-            AddControl(flowSeq, "Старт X,Y (мм):", txtStart);
-            AddControl(flowSeq, "Макс. ширина строки (мм):", numMaxW);
-            AddControl(flowSeq, "Отступ снизу (мм):", numVGap);
-            AddControl(flowSeq, "Отступ сбоку (мм):", numHGap);
+            // Устанавливаем текущее значение (если пусто - Center)
+            string currentAnchor = cfg.SequentialDrawing.Anchor;
+            if (string.IsNullOrEmpty(currentAnchor)) currentAnchor = "Center";
+            if (!cbAnchor.Items.Contains(currentAnchor)) cbAnchor.Items.Add(currentAnchor);
+            cbAnchor.SelectedItem = currentAnchor;
+
+            // Добавляем контролы в FlowLayout
+            AddControl(flowSeq, "Старт X,Y:", txtStart);
+            AddControl(flowSeq, "Макс. ширина:", numMaxW);
+            AddControl(flowSeq, "Отступ снизу:", numVGap);
+            AddControl(flowSeq, "Отступ сбоку:", numHGap);
+
+            // Добавляем чекбокс и сразу за ним настройку якоря
             flowSeq.Controls.Add(chkEn);
+            flowSeq.Controls.Add(lblAnchor); // Подпись
+            flowSeq.Controls.Add(cbAnchor);  // Выпадающий список
 
             grpSeq.Controls.Add(flowSeq);
-            leftPanel.Controls.Add(grpSeq);
 
-            // 3. Таблица фиксированных фигур
-            var gridLabel = new Label { Text = "Фиксированные фигуры (Шапки, Рамки):", Dock = DockStyle.Top, Height = 25, Font = new Font("Segoe UI", 9, FontStyle.Bold), Padding = new Padding(0, 5, 0, 0) };
-            var dgv = new DataGridView
+            // Добавляем настройки в левую панель
+            leftPanel.Controls.Add(grpSeq);
+            leftPanel.Controls.Add(topPanel);
+
+            // 3. Таблица ФИКСИРОВАННЫХ фигур (Predefined)
+            // Просто занимает всё оставшееся место (без SplitContainer)
+            var pnlFixed = new Panel { Dock = DockStyle.Fill, Padding = new Padding(0, 5, 0, 0) };
+            var lblFixed = new Label { Text = "Фиксированные фигуры (Шапки, Рамки):", Dock = DockStyle.Top, Height = 20, Font = new Font("Segoe UI", 9, FontStyle.Bold) };
+
+            var dgvFixed = new DataGridView
             {
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
                 BackgroundColor = Color.White,
                 ColumnHeadersHeight = 30
             };
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Имя мастера", DataPropertyName = "MasterName", Width = 150 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "X (мм)", DataPropertyName = "X", Width = 50 });
-            dgv.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Y (мм)", DataPropertyName = "Y", Width = 50 });
+            dgvFixed.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Имя мастера", DataPropertyName = "MasterName", Width = 150 });
+            dgvFixed.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "X (мм)", DataPropertyName = "X", Width = 50 });
+            dgvFixed.Columns.Add(new DataGridViewTextBoxColumn { HeaderText = "Y (мм)", DataPropertyName = "Y", Width = 50 });
 
-            var colAnchor = new DataGridViewComboBoxColumn { HeaderText = "Anchor", DataPropertyName = "Anchor", Width = 80 };
-            colAnchor.Items.AddRange("Center", "TopLeft", "BottomLeft");
-            dgv.Columns.Add(colAnchor);
+            var colAnchorFixed = new DataGridViewComboBoxColumn { HeaderText = "Anchor", DataPropertyName = "Anchor", Width = 80 };
+            colAnchorFixed.Items.AddRange("Center", "TopLeft", "BottomLeft");
+            dgvFixed.Columns.Add(colAnchorFixed);
 
-            var bindingList = new System.ComponentModel.BindingList<PredefinedViewModel>(
+            var bindingListFixed = new System.ComponentModel.BindingList<PredefinedViewModel>(
                 cfg.PredefinedMasterConfigs.Select(p => new PredefinedViewModel(p)).ToList()
             );
-            dgv.DataSource = bindingList;
+            dgvFixed.DataSource = bindingListFixed;
 
-            // Сборка левой панели (Порядок добавления важен для Dock)
-            leftPanel.Controls.Add(dgv);     // Fill
-            leftPanel.Controls.Add(gridLabel); // Top
-            leftPanel.Controls.Add(grpSeq);  // Top
-            leftPanel.Controls.Add(topPanel); // Top
+            pnlFixed.Controls.Add(dgvFixed);
+            pnlFixed.Controls.Add(lblFixed);
+
+            // Важно: pnlFixed добавляем первым (или с BringToFront), так как у него Dock.Fill
+            // Но так как topPanel и grpSeq имеют Dock.Top, правильнее добавлять pnlFixed в leftPanel ПОСЛЕ них,
+            // и WinForms заполнит оставшееся пространство.
+            leftPanel.Controls.Add(pnlFixed);
+            pnlFixed.BringToFront(); // На всякий случай, чтобы корректно занял место в центре
+
             split.Panel1.Controls.Add(leftPanel);
 
             // --- ПРАВАЯ ЧАСТЬ: ПРЕВЬЮ ---
@@ -395,15 +432,14 @@ namespace ZontSpecExtractor
                 Dock = DockStyle.Fill,
                 PageSize = cfg.PageSize,
                 Orientation = cfg.PageOrientation,
-                FixedShapes = cfg.PredefinedMasterConfigs, // <--- ИСПРАВЛЕНИЕ: Используем FixedShapes
+                FixedShapes = cfg.PredefinedMasterConfigs,
                 SeqConfig = cfg.SequentialDrawing
             };
             split.Panel2.Controls.Add(previewPanel);
 
-            // --- СОБЫТИЯ ---
+            // --- СОБЫТИЯ ОБНОВЛЕНИЯ ---
             Action updatePreview = () =>
             {
-                // Обновляем конфиг из UI
                 cfg.PageSize = cbSize.Text;
                 cfg.SequentialDrawing.StartCoordinatesXY = txtStart.Text;
                 cfg.SequentialDrawing.MaxLineWidthMM = (double)numMaxW.Value;
@@ -411,24 +447,27 @@ namespace ZontSpecExtractor
                 cfg.SequentialDrawing.HorizontalStepMM = (double)numHGap.Value;
                 cfg.SequentialDrawing.Enabled = chkEn.Checked;
 
-                // Обновляем список предопределенных
-                cfg.PredefinedMasterConfigs = bindingList.Select(vm => vm.ToConfig()).ToList();
+                // Сохраняем выбранный якорь
+                if (cbAnchor.SelectedItem != null)
+                    cfg.SequentialDrawing.Anchor = cbAnchor.SelectedItem.ToString();
 
-                // Обновляем свойства панели
+                // Сохраняем фиксированные
+                cfg.PredefinedMasterConfigs = bindingListFixed.Select(vm => vm.ToConfig()).ToList();
+
                 previewPanel.PageSize = cfg.PageSize;
                 previewPanel.Orientation = cfg.PageOrientation;
-                previewPanel.FixedShapes = cfg.PredefinedMasterConfigs; // Обновляем ссылку
+                previewPanel.FixedShapes = cfg.PredefinedMasterConfigs;
                 previewPanel.SeqConfig = cfg.SequentialDrawing;
 
-                previewPanel.Invalidate(); // Перерисовка
+                previewPanel.Invalidate();
             };
 
-            // Привязываем события
+            // Привязка событий
             cbSize.SelectedIndexChanged += (s, e) => updatePreview();
             btnOrient.Click += (s, e) => {
                 cfg.PageOrientation = (cfg.PageOrientation == "Portrait") ? "Landscape" : "Portrait";
                 btnOrient.Text = cfg.PageOrientation == "Landscape" ? "Альбомная" : "Книжная";
-                previewPanel.Orientation = cfg.PageOrientation; // Сразу меняем в панели
+                previewPanel.Orientation = cfg.PageOrientation;
                 updatePreview();
             };
 
@@ -438,9 +477,12 @@ namespace ZontSpecExtractor
             numHGap.ValueChanged += (s, e) => updatePreview();
             chkEn.CheckedChanged += (s, e) => updatePreview();
 
-            dgv.CellEndEdit += (s, e) => updatePreview();
-            dgv.RowsRemoved += (s, e) => updatePreview();
-            dgv.UserAddedRow += (s, e) => updatePreview();
+            // При изменении якоря обновляем конфиг
+            cbAnchor.SelectedIndexChanged += (s, e) => updatePreview();
+
+            dgvFixed.CellEndEdit += (s, e) => updatePreview();
+            dgvFixed.RowsRemoved += (s, e) => updatePreview();
+            dgvFixed.UserAddedRow += (s, e) => updatePreview();
 
             page.Controls.Add(split);
             return page;
@@ -533,12 +575,13 @@ namespace ZontSpecExtractor
             var layout = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                RowCount = 4,
+                RowCount = 5, // <-- БЫЛО 4, СТАЛО 5 (добавилась строка для файла)
                 RowStyles = {
-            new RowStyle(SizeType.Absolute, 30),
-            new RowStyle(SizeType.Absolute, 60),
-            new RowStyle(SizeType.Absolute, 30),
-            new RowStyle(SizeType.Percent, 100)
+            new RowStyle(SizeType.Absolute, 30), // Заголовок листов
+            new RowStyle(SizeType.Absolute, 60), // Поле листов
+            new RowStyle(SizeType.Absolute, 40), // <-- НОВАЯ СТРОКА: Доп. таблица
+            new RowStyle(SizeType.Absolute, 30), // Заголовок правил
+            new RowStyle(SizeType.Percent, 100)  // Таблица правил
         }
             };
 
@@ -547,19 +590,45 @@ namespace ZontSpecExtractor
             _rtxtSheetNames = new RichTextBox { Dock = DockStyle.Fill, Text = string.Join(Environment.NewLine, AppSettings.SearchConfig.TargetSheetNames), ReadOnly = true, BackColor = SystemColors.ControlLight };
             layout.Controls.Add(_rtxtSheetNames, 0, 1);
 
-            // 2. Правила поиска
-            layout.Controls.Add(new Label { Text = "Правила поиска и условий:", Dock = DockStyle.Bottom, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 2);
+            // === [НОВОЕ] 2. Окно выбора дополнительной таблицы ===
+            var auxPanel = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, Padding = new Padding(0, 5, 0, 0) };
+            var lblAux = new Label { Text = "Доп. таблица:", AutoSize = true, Padding = new Padding(0, 5, 0, 0) };
+
+            var txtAux = new TextBox { Width = 350, ReadOnly = true, BackColor = SystemColors.ControlLight };
+            // Привязка к свойству AuxFilePath (убедитесь, что оно есть в AppSettings.SearchConfig)
+            txtAux.DataBindings.Add("Text", AppSettings.SearchConfig, "AuxFilePath", false, DataSourceUpdateMode.OnPropertyChanged);
+
+            var btnAux = new Button { Text = "...", Width = 30, Height = 23 };
+            btnAux.Click += (s, e) =>
+            {
+                using var ofd = new OpenFileDialog { Filter = "Excel Files|*.xlsx;*.xlsm" };
+                if (ofd.ShowDialog() == DialogResult.OK)
+                {
+                    txtAux.Text = ofd.FileName;
+                    AppSettings.SearchConfig.AuxFilePath = ofd.FileName; // Явное обновление
+                }
+            };
+
+            var btnClearAux = new Button { Text = "X", Width = 30, Height = 23, ForeColor = Color.Red };
+            btnClearAux.Click += (s, e) => { txtAux.Text = ""; AppSettings.SearchConfig.AuxFilePath = ""; };
+
+            auxPanel.Controls.AddRange(new Control[] { lblAux, txtAux, btnAux, btnClearAux });
+            layout.Controls.Add(auxPanel, 0, 2);
+            // =======================================================
+
+            // 3. Заголовок Правила поиска
+            layout.Controls.Add(new Label { Text = "Правила поиска и условий:", Dock = DockStyle.Bottom, Font = new Font("Segoe UI", 9, FontStyle.Bold) }, 0, 3);
 
             _dgvSearchRules = new DataGridView
             {
                 Dock = DockStyle.Fill,
                 AutoGenerateColumns = false,
                 BackgroundColor = Color.White,
-                ColumnHeadersHeight = 40, // Чуть выше для читаемости
+                ColumnHeadersHeight = 40,
                 AllowUserToResizeColumns = true
             };
 
-            // --- КОЛОНКИ ТАБЛИЦЫ ---
+            // --- КОЛОНКИ ТАБЛИЦЫ (ВАШИ СТАРЫЕ) ---
 
             // 1. Искомое слово
             _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
@@ -570,7 +639,7 @@ namespace ZontSpecExtractor
                 MinimumWidth = 150
             });
 
-            // 2. Где искать само слово (Например "C")
+            // 2. Где искать само слово
             _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
             {
                 HeaderText = "Где искать\n(Col: C)",
@@ -587,7 +656,7 @@ namespace ZontSpecExtractor
                 Width = 60
             });
 
-            // 4. Где искать условие (Например "L")
+            // 4. Где искать условие
             _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
             {
                 HeaderText = "Где условие\n(Col: L)",
@@ -596,7 +665,7 @@ namespace ZontSpecExtractor
                 DefaultCellStyle = new DataGridViewCellStyle { Alignment = DataGridViewContentAlignment.MiddleCenter }
             });
 
-            // 5. Значение условия (Например "1")
+            // 5. Значение условия
             _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
             {
                 HeaderText = "Значение\nусловия (1)",
@@ -613,10 +682,54 @@ namespace ZontSpecExtractor
                 Width = 60
             });
 
-            // Привязка данных
+            // 7. Искать по значению (Галочка)
+            _dgvSearchRules.Columns.Add(new DataGridViewCheckBoxColumn
+            {
+                HeaderText = "Взять текст\nесли (1)?",
+                DataPropertyName = "SearchByValue",
+                Width = 80
+            });
+
+            _dgvSearchRules.Columns.Add(new DataGridViewTextBoxColumn
+            {
+                DataPropertyName = "ExcludedRows",
+                HeaderText = "Исключить строки (напр. 10, 229-)",
+                Width = 120
+            });
+
+            var targetColParams = new DataGridViewComboBoxColumn
+            {
+                DataPropertyName = "TargetColumn",
+                HeaderText = "Куда записать результат",
+                Width = 150,
+                DisplayStyle = DataGridViewComboBoxDisplayStyle.ComboBox
+            };
+            // (Ваш список колонок TargetColumn)
+            targetColParams.Items.AddRange(new object[] {
+        "Position", "Col4", "Col5", "Col6", "Col7", "Col8",
+        "Col9", "Col10", "Col11", "Col12", "Col13", "Col14",
+        "Col15", "Col16", "Col17", "Col18"
+    });
+            _dgvSearchRules.Columns.Add(targetColParams);
+
+            // === [НОВОЕ] 8. Откуда брать результат ===
+            var sourceCol = new DataGridViewComboBoxColumn
+            {
+                HeaderText = "Откуда брать\nрезультат",
+                DataPropertyName = "ResultSource",
+                DataSource = Enum.GetValues(typeof(DataSourceType)),
+                Width = 120,
+                FlatStyle = FlatStyle.Flat
+            };
+            _dgvSearchRules.Columns.Add(sourceCol);
+            // =========================================
+
+            // Обработка ошибок DataError (чтобы не падало при выборе комбобокса)
+            _dgvSearchRules.DataError += (s, e) => { e.ThrowException = false; };
+
             _dgvSearchRules.DataSource = new System.ComponentModel.BindingList<SearchRule>(AppSettings.SearchConfig.Rules ?? new List<SearchRule>());
 
-            layout.Controls.Add(_dgvSearchRules, 0, 3);
+            layout.Controls.Add(_dgvSearchRules, 0, 4); // <-- ИНДЕКС СТРОКИ СТАЛ 4
 
             panel.Controls.Add(layout);
             return panel;
@@ -655,13 +768,13 @@ namespace ZontSpecExtractor
                 Dock = DockStyle.Fill,
                 RowCount = 7,
                 RowStyles = {
-            new RowStyle(SizeType.Absolute, 20), // Заголовок
-            new RowStyle(SizeType.Absolute, 20), // Label Трафареты
-            new RowStyle(SizeType.Absolute, 60), // Путь к трафаретам
-            new RowStyle(SizeType.Absolute, 35), // Кнопки
-            new RowStyle(SizeType.Percent, 40),  // НОВОЕ: Окно найденных фигур (AvailableMasters)
-            new RowStyle(SizeType.Absolute, 20), // Label Карта
-            new RowStyle(SizeType.Percent, 60)   // Карта
+            new RowStyle(SizeType.Absolute, 20),
+            new RowStyle(SizeType.Absolute, 20),
+            new RowStyle(SizeType.Absolute, 60),
+            new RowStyle(SizeType.Absolute, 35),
+            new RowStyle(SizeType.Percent, 40),
+            new RowStyle(SizeType.Absolute, 20),
+            new RowStyle(SizeType.Percent, 60)
         }
             };
 
@@ -672,11 +785,10 @@ namespace ZontSpecExtractor
             rPath.Text = string.Join(Environment.NewLine, cfg.StencilFilePaths);
             l.Controls.Add(rPath, 0, 2);
 
-            // 2. Кнопки
+            // 2. Кнопки (оставляем как было)
             var btnP = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight };
             var btnAdd = new Button { Text = "+", Width = 30 };
-            btnAdd.Click += (s, e) =>
-            {
+            btnAdd.Click += (s, e) => {
                 using (var ofd = new OpenFileDialog { Multiselect = true, Filter = "Visio|*.vssx;*.vsdx" })
                 {
                     if (ofd.ShowDialog() == DialogResult.OK)
@@ -686,41 +798,58 @@ namespace ZontSpecExtractor
                     }
                 }
             };
-            btnP.Controls.Add(btnAdd);
             var btnClear = new Button { Text = "X", Width = 30, ForeColor = Color.Red };
             btnClear.Click += (s, e) => { cfg.StencilFilePaths.Clear(); rPath.Text = ""; };
-            btnP.Controls.Add(btnClear);
 
-            // Кнопка для сканирования, чтобы узнать имена
+            // Кнопка Сканировать
             var btnScan = new Button { Text = "Сканировать", AutoSize = true, BackColor = Color.LightGreen };
-            // Мы передаем rFoundMasters, чтобы сразу обновить текст
             var rFoundMasters = new RichTextBox { Dock = DockStyle.Fill, Font = new Font("Consolas", 8), BackColor = Color.Beige };
             btnScan.Click += (s, e) => {
-                ScanMasters(cfg); // Обновляет cfg.AvailableMasters
-                rFoundMasters.Text = string.Join(Environment.NewLine, cfg.AvailableMasters.OrderBy(m => m)); // Обновляем окно
+                ScanMasters(cfg);
+                rFoundMasters.Text = string.Join(Environment.NewLine, cfg.AvailableMasters.OrderBy(m => m));
             };
+
             btnP.Controls.Add(btnAdd);
-            btnP.Controls.Add(btnClear); // определите кнопку удаления как раньше
+            btnP.Controls.Add(btnClear);
             btnP.Controls.Add(btnScan);
             l.Controls.Add(btnP, 0, 3);
 
-            // 3. НОВОЕ ОКНО: Найденные фигуры (Сохраняется с настройками)
-            // Загружаем сохраненные
+            // 3. Найденные фигуры
             rFoundMasters.Text = string.Join(Environment.NewLine, cfg.AvailableMasters.OrderBy(m => m));
-            // При изменении текста пользователем вручную - сохраняем обратно в конфиг
-            rFoundMasters.TextChanged += (s, e) => {
-                cfg.AvailableMasters = rFoundMasters.Text.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).ToList();
-            };
-
-            var grpFound = new GroupBox { Text = "Найденные фигуры (можно копировать):", Dock = DockStyle.Fill };
+            var grpFound = new GroupBox { Text = "Найденные фигуры:", Dock = DockStyle.Fill };
             grpFound.Controls.Add(rFoundMasters);
             l.Controls.Add(grpFound, 0, 4);
 
-            // 4. Карта
-            l.Controls.Add(new Label { Text = "Карта (Excel=Col=Master):", Dock = DockStyle.Bottom }, 0, 5);
-            rMap.Text = string.Join(Environment.NewLine, cfg.SearchRules.Select(r => $"{r.ExcelValue}={r.SearchColumn}={r.VisioMasterName}"));
-            l.Controls.Add(rMap, 0, 6);
+            // =========================================================================
+            // 4. ИЗМЕНЕНИЯ ЗДЕСЬ: КАРТА (Excel=Master)
+            // =========================================================================
+            l.Controls.Add(new Label { Text = "Карта (Excel=Master):", Dock = DockStyle.Bottom }, 0, 5);
 
+            // Отображаем в формате "Excel=VisioMaster"
+            rMap.Text = string.Join(Environment.NewLine, cfg.SearchRules.Select(r => $"{r.ExcelValue}={r.VisioMasterName}"));
+
+            // Обработчик сохранения изменений из текста в конфиг
+            rMap.Leave += (s, e) => {
+                var newRules = new List<SearchRule>();
+                foreach (var line in rMap.Lines)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    var parts = line.Split('=');
+                    if (parts.Length >= 2)
+                    {
+                        newRules.Add(new SearchRule
+                        {
+                            // ВАЖНО: TrimStart() удаляет пробелы в начале, но оставляет в конце (например "Т ")
+                            ExcelValue = parts[0].TrimStart(),
+                            VisioMasterName = parts[1].Trim(),
+                            SearchColumn = ""
+                        });
+                    }
+                }
+                cfg.SearchRules = newRules;
+            };
+
+            l.Controls.Add(rMap, 0, 6);
             p.Controls.Add(l);
             return p;
         }
@@ -747,6 +876,8 @@ namespace ZontSpecExtractor
         private List<SearchRule> ParseSearchRules(RichTextBox rtb)
         {
             var rules = new List<SearchRule>();
+
+            // Проверка на пустоту
             if (rtb == null || string.IsNullOrWhiteSpace(rtb.Text)) return rules;
 
             // Разбиваем текст на строки
@@ -755,6 +886,7 @@ namespace ZontSpecExtractor
             foreach (var line in lines)
             {
                 var trimLine = line.Trim();
+                // Пропускаем пустые строки и комментарии
                 if (string.IsNullOrWhiteSpace(trimLine) || trimLine.StartsWith("//")) continue;
 
                 // Разбиваем по знаку равенства
@@ -765,9 +897,9 @@ namespace ZontSpecExtractor
                 {
                     rules.Add(new SearchRule
                     {
-                        ExcelValue = parts[0].Trim(),      // "Слово"
-                        SearchColumn = "",                 // Колонка не указана
-                        VisioMasterName = parts[1].Trim()  // "Мастер"
+                        ExcelValue = parts[0].Trim(),       // Что ищем в Excel
+                        SearchColumn = "",                  // Колонка не указана (ищем везде или по дефолту)
+                        VisioMasterName = parts[1].Trim()   // Имя фигуры в Visio
                     });
                 }
                 // ВАРИАНТ 2: "Слово = Колонка = Мастер" (3 части)
@@ -775,9 +907,9 @@ namespace ZontSpecExtractor
                 {
                     rules.Add(new SearchRule
                     {
-                        ExcelValue = parts[0].Trim(),      // "Слово"
-                        SearchColumn = parts[1].Trim(),    // "Колонка" (например "V")
-                        VisioMasterName = parts[2].Trim()  // "Мастер"
+                        ExcelValue = parts[0].Trim(),       // Что ищем
+                        SearchColumn = parts[1].Trim(),     // Конкретная колонка (например "B")
+                        VisioMasterName = parts[2].Trim()   // Имя фигуры
                     });
                 }
             }
@@ -996,14 +1128,22 @@ namespace ZontSpecExtractor
     public class RawExcelHit
     {
         public string SheetName { get; set; }
-        public string FullItemName { get; set; } // Сюда теперь попадет "Насос ГВС", а не просто "Насос"
+        public string FullItemName { get; set; }
         public string SearchTerm { get; set; }
         public bool ConditionMet { get; set; }
         public int Quantity { get; set; }
         public bool IsLimited { get; set; }
 
         public SearchRule FoundRule { get; set; }
-        public string TargetMasterName { get; set; } // <-- Для вывода в таблицу (Visio Name)
+        public string TargetMasterName { get; set; }
+
+        public string TargetColumn { get; set; } = "Position";
+
+        // === [ИНЪЕКЦИЯ 1] Поле для хранения приоритета (номера клеммы) ===
+        public int SchematicOrder { get; set; } = 999;
+
+        public int RowIndex { get; set; }
+        public int SortIndex { get; set; }
     }
 
 
@@ -1141,18 +1281,22 @@ namespace ZontSpecExtractor
 
     public partial class Form1 : Form
     {
+        private ExcelPackage? _excelPackage;      // Основной файл
+        private ExcelPackage? _auxExcelPackage;
         private static readonly string[] COLS_OUT = {
-            "Лист", "Наименование", "Количество"
+            "Номер", "Наименование", "Приоритет"
         };
-
+        private DataGridView mainDgv;
+        private Dictionary<string, int> _visioPriorityMap = new Dictionary<string, int>();
         private List<Dictionary<string, string>> data;
         private DataGridView dataGridView = null!;
         private Label lblFileInfo = null!;
         private Label lblStatus = null!;
         private Panel statusPanel = null!;
+        private string _visioSourceSheetName = "1.ТЗ на объект ZONT для VISIO";
         // Коэффициент для перевода из миллиметров в дюймы (1 дюйм = 25.4 мм)
         private const double MM_TO_INCH = 1.0 / 25.4;
-                                                       // НОВОЕ ПОЛЕ для хранения детальной, сырой информации
+        // НОВОЕ ПОЛЕ для хранения детальной, сырой информации
         private List<RawExcelHit> _rawHits = new List<RawExcelHit>();
         //private TextBox _textBoxTargetSheets = null!;
         //private TextBox _textBoxSearchWords = null!;
@@ -1178,6 +1322,22 @@ namespace ZontSpecExtractor
                 sum += (c - 'A' + 1);
             }
             return sum;
+        }
+
+        public class VisioDrawItem
+        {
+            public string MasterName { get; set; } = "";
+            public string Text { get; set; } = ""; // Текст для подписи фигуры (если нужно)
+
+            // Тип размещения: "Manual" (фиксированные координаты) или "Sequential" (змейка)
+            public string PlacementType { get; set; } = "Sequential";
+
+            // Координаты (в миллиметрах)
+            public double X_MM { get; set; } = 0;
+            public double Y_MM { get; set; } = 0;
+
+            // Привязка (Anchor)
+            public string Anchor { get; set; } = "Center";
         }
 
         private Dictionary<string, EquipmentItem> _equipmentConfig = new Dictionary<string, EquipmentItem>(StringComparer.OrdinalIgnoreCase)
@@ -1357,7 +1517,7 @@ namespace ZontSpecExtractor
 
             if (allMasters.Count == 0) return;
 
-            UpdateStatus("⏳ Обновление размеров фигур из Visio...");
+            UpdateStatus("? Обновление размеров фигур из Visio...");
 
             // 3. ПАКЕТНОЕ ПОЛУЧЕНИЕ РАЗМЕРОВ (Один вызов Visio)
             var sizes = VisioScanner.GetMastersDimensionsBatch(allMasters, allStencils);
@@ -1367,7 +1527,7 @@ namespace ZontSpecExtractor
             ApplySizesToConfig(AppSettings.LabelingConfig, sizes);
             ApplySizesToConfig(AppSettings.CabinetConfig, sizes);
 
-            UpdateStatus("✅ Размеры фигур обновлены.");
+            UpdateStatus("? Размеры фигур обновлены.");
         }
 
         private void ApplySizesToConfig(VisioConfiguration cfg, Dictionary<string, (double w, double h)> sizes)
@@ -1484,6 +1644,7 @@ namespace ZontSpecExtractor
                     );
                 }
 
+                // 1. РИСУЕМ ФИКСИРОВАННЫЕ ФИГУРЫ (СИНИЕ)
                 if (FixedShapes != null)
                 {
                     using (var brush = new SolidBrush(Color.FromArgb(80, 0, 0, 255)))
@@ -1829,7 +1990,7 @@ namespace ZontSpecExtractor
             }
             else
             {
-                UpdateStatus("⚠️ Не удалось найти ни одной фигуры Visio в указанных трафаретах.");
+                UpdateStatus("?? Не удалось найти ни одной фигуры Visio в указанных трафаретах.");
             }
         }
 
@@ -1894,7 +2055,7 @@ namespace ZontSpecExtractor
                 {
                     AppSettings.LastLoadedFilePath = openFileDialog.FileName;
 
-                    // Шаг 1: Получаем все имена листов из выбранного файла
+                    // Шаг 1: Получаем все имена листов
                     var allSheetNames = GetSheetNames(AppSettings.LastLoadedFilePath);
 
                     if (!allSheetNames.Any())
@@ -1903,16 +2064,19 @@ namespace ZontSpecExtractor
                         return;
                     }
 
-                    // Шаг 2: Открываем форму выбора листов, передавая текущие сохраненные листы как начальный выбор
+                    // Шаг 2: Диалог - Выбор листов для АНАЛИЗА
+                    // Используем ранее сохраненный список для предвыбора (если есть)
                     using (var sheetForm = new SheetSelectionForm(allSheetNames, AppSettings.SearchConfig.TargetSheetNames))
                     {
+                        sheetForm.Text = "Выберите листы для АНАЛИЗА (Поиск позиций)"; // Убрал нумерацию "1.", так как шаг теперь один
+
                         if (sheetForm.ShowDialog() == DialogResult.OK)
                         {
-                            // Шаг 3: Сохраняем выбранные листы в настройки
+                            // Сохраняем настройки анализа
                             AppSettings.SearchConfig.TargetSheetNames = sheetForm.SelectedSheets;
-                            AppSettings.Save(); // Сохраняем настройки в файл
+                            AppSettings.Save();
 
-                            // Шаг 4: Запускаем загрузку файлов с новыми настройками
+                            // Сразу запускаем основную обработку, пропуская второй диалог
                             LoadFiles(new[] { AppSettings.LastLoadedFilePath });
                         }
                         else
@@ -1928,58 +2092,150 @@ namespace ZontSpecExtractor
         {
             if (!_rawHits.Any())
             {
-                MessageBox.Show("Сначала необходимо загрузить и проанализировать Excel-файл (кнопка 'Загрузить Excel')!");
+                MessageBox.Show("Сначала необходимо загрузить и проанализировать Excel-файл!");
                 return;
             }
 
-            // 1. Группируем сырые данные по ДОСЛОВНОМУ названию позиции
-            var detailedTableData = _rawHits
-                .Where(h => h.ConditionMet) // Только те, которые прошли проверку условий (число в ячейке)
-                .GroupBy(h => h.FullItemName) // <--- ГРУППИРУЕМ ПО ДОСЛОВНОМУ СОДЕРЖАНИЮ ЯЧЕЙКИ
-                .Select((g, index) => new
+            // =================================================================================
+            // 1. ПОДГОТОВКА ДАННЫХ (Строгая привязка к строкам Excel)
+            // =================================================================================
+
+            // Мы группируем находки по Имени листа и Номеру строки.
+            // Это гарантирует, что данные одной строки останутся вместе.
+            var rowsData = _rawHits
+                .Where(h => h.ConditionMet) // Берем только то, где выполнилось условие (где была "1")
+                .GroupBy(h => new { h.SheetName, h.RowIndex }) // ГРУППИРОВКА ПО СТРОКЕ
+                .Select(g => new
                 {
-                    Number = index + 1,        // Номер по порядку
-                    Position = g.Key,          // Позиция (дословно)
-                    Count = g.Sum(x => x.Quantity) // Сумма количества
+                    // Сортировка: сначала по листам, потом по номеру строки в Excel
+                    SortSheet = g.Key.SheetName,
+                    SortRow = g.Key.RowIndex,
+
+                    // Ищем данные для каждой колонки ИМЕННО В ЭТОЙ СТРОКЕ (g)
+
+                    // Основная позиция (TargetColumn = "Position" или пусто)
+                    Position = g.FirstOrDefault(x => string.IsNullOrEmpty(x.TargetColumn) || x.TargetColumn == "Position")?.FullItemName,
+
+                    // Количество (берем от позиции или 1)
+                    Quantity = g.Where(x => string.IsNullOrEmpty(x.TargetColumn) || x.TargetColumn == "Position").Sum(x => x.Quantity),
+
+                    // Остальные колонки. Если в этой строке нет данных для Col4, будет null (пустота)
+                    Col4 = g.FirstOrDefault(x => x.TargetColumn == "Col4")?.FullItemName,
+                    Col5 = g.FirstOrDefault(x => x.TargetColumn == "Col5")?.FullItemName,
+                    Col6 = g.FirstOrDefault(x => x.TargetColumn == "Col6")?.FullItemName,
+                    Col7 = g.FirstOrDefault(x => x.TargetColumn == "Col7")?.FullItemName,
+                    Col8 = g.FirstOrDefault(x => x.TargetColumn == "Col8")?.FullItemName,
+                    Col9 = g.FirstOrDefault(x => x.TargetColumn == "Col9")?.FullItemName,
+                    Col10 = g.FirstOrDefault(x => x.TargetColumn == "Col10")?.FullItemName,
+                    Col11 = g.FirstOrDefault(x => x.TargetColumn == "Col11")?.FullItemName,
+                    Col12 = g.FirstOrDefault(x => x.TargetColumn == "Col12")?.FullItemName,
+                    Col13 = g.FirstOrDefault(x => x.TargetColumn == "Col13")?.FullItemName,
+                    Col14 = g.FirstOrDefault(x => x.TargetColumn == "Col14")?.FullItemName,
+                    Col15 = g.FirstOrDefault(x => x.TargetColumn == "Col15")?.FullItemName,
+                    Col16 = g.FirstOrDefault(x => x.TargetColumn == "Col16")?.FullItemName,
+                    Col17 = g.FirstOrDefault(x => x.TargetColumn == "Col17")?.FullItemName,
+                    Col18 = g.FirstOrDefault(x => x.TargetColumn == "Col18")?.FullItemName
                 })
-                .OrderBy(x => x.Number)
+                // СОРТИРОВКА: Строго как в Excel (по порядку строк)
+                .OrderBy(x => x.SortSheet).ThenBy(x => x.SortRow)
                 .ToList();
 
-            if (!detailedTableData.Any())
+            if (!rowsData.Any())
             {
-                MessageBox.Show("Не найдено позиций, удовлетворяющих правилам поиска и условиям.");
+                MessageBox.Show("Не найдено данных для формирования таблицы.");
                 return;
             }
 
-            // 2. Создаем и показываем новую форму с таблицей
+            // =================================================================================
+            // 2. СОЗДАНИЕ И НАСТРОЙКА ТАБЛИЦЫ
+            // =================================================================================
+
+            // Безопасное получение имени листа (исправление ошибки CS0029)
+            string visioSheetName = "";
+            try
+            {
+                var source = AppSettings.SearchConfig.VisioSourceSheetName;
+                if (source is IEnumerable<string> list) visioSheetName = list.FirstOrDefault() ?? "";
+                else visioSheetName = source?.ToString() ?? "";
+            }
+            catch { visioSheetName = "Ошибка имени"; }
+
             var tableForm = new Form
             {
-                Text = "Таблица найденных позиций (Спецификация)",
-                Size = new Size(800, 600),
+                Text = $"Спецификация (Лист Visio: {(string.IsNullOrEmpty(visioSheetName) ? "Не выбран" : visioSheetName)})",
+                Size = new Size(1400, 600),
                 StartPosition = FormStartPosition.CenterParent
             };
 
             var dgv = new DataGridView
             {
                 Dock = DockStyle.Fill,
-                ReadOnly = true,
                 AllowUserToAddRows = false,
-                AutoGenerateColumns = true,
-                DataSource = detailedTableData
+                AutoSizeColumnsMode = DataGridViewAutoSizeColumnsMode.None,
+                ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
             };
 
-            // Переименование заголовков согласно требованиям:
-            dgv.DataBindingComplete += (s, ev) =>
+            // --- ДОБАВЛЕНИЕ КОЛОНОК ---
+            dgv.Columns.Add("Priority", "Номер приоритета");
+            dgv.Columns.Add("Position", "Позиция (дословно)"); dgv.Columns["Position"].Width = 200;
+            dgv.Columns.Add("Quantity", "Количество");
+
+            dgv.Columns.Add("Col4", "Котёл/Насос/Кран");
+            dgv.Columns.Add("Col5", "Кл. Насос/Котёл");
+            dgv.Columns.Add("Col6", "Смеситель/кран2/охрана");
+            dgv.Columns.Add("Col7", "Кл. Смесит/Кран ОТКР");
+            dgv.Columns.Add("Col8", "Кл. Смесит/Кран ЗАКР");
+            dgv.Columns.Add("Col9", "Кл. 1 Шина управл");
+            dgv.Columns.Add("Col10", "Кл. 2 Шина управл");
+            dgv.Columns.Add("Col11", "Минус");
+            dgv.Columns.Add("Col12", "Датчики 1");
+            dgv.Columns.Add("Col13", "Датчик2 / Питание +5В");
+            dgv.Columns.Add("Col14", "Кл. 1 Датчик (-12В)");
+            dgv.Columns.Add("Col15", "Кл. 2 Датчик T1");
+            dgv.Columns.Add("Col16", "Кл. 3 Датчик T2");
+            dgv.Columns.Add("Col17", "Кл. 4 Датчик воздух");
+            dgv.Columns.Add("Col18", "Кл. 5 Датчик (+5В)");
+
+            // =================================================================================
+            // 3. ЗАПОЛНЕНИЕ ДАННЫМИ (Строго по строкам)
+            // =================================================================================
+
+            for (int i = 0; i < rowsData.Count; i++)
             {
-                if (dgv.Columns["Number"] != null) dgv.Columns["Number"].HeaderText = "Номер по порядку";
-                if (dgv.Columns["Position"] != null) dgv.Columns["Position"].HeaderText = "Позиция (дословно)";
-                if (dgv.Columns["Count"] != null) dgv.Columns["Count"].HeaderText = "Количество";
+                var dataItem = rowsData[i];
 
-                // Настройка ширины
-                if (dgv.Columns["Number"] != null) dgv.Columns["Number"].Width = 100;
-                if (dgv.Columns["Position"] != null) dgv.Columns["Position"].AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
-                if (dgv.Columns["Count"] != null) dgv.Columns["Count"].Width = 100;
-            };
+                int rowIndex = dgv.Rows.Add();
+                var row = dgv.Rows[rowIndex];
+
+                // Номер п/п (просто порядковый номер в итоговой таблице)
+                row.Cells["Priority"].Value = i + 1;
+
+                // Позиция
+                row.Cells["Position"].Value = dataItem.Position;
+
+                // Количество (если 0, можно не писать или писать 0 - по желанию)
+                // Если позиция пустая, но есть насос, количество может быть 0, если не настроено иначе
+                row.Cells["Quantity"].Value = dataItem.Quantity == 0 ? 1 : dataItem.Quantity;
+
+                // Заполняем остальные колонки. 
+                // Если в dataItem.Col4 ничего нет (null), в ячейку запишется null (пустота).
+                // Следующее значение НЕ перепрыгнет сюда.
+                row.Cells["Col4"].Value = dataItem.Col4;
+                row.Cells["Col5"].Value = dataItem.Col5;
+                row.Cells["Col6"].Value = dataItem.Col6;
+                row.Cells["Col7"].Value = dataItem.Col7;
+                row.Cells["Col8"].Value = dataItem.Col8;
+                row.Cells["Col9"].Value = dataItem.Col9;
+                row.Cells["Col10"].Value = dataItem.Col10;
+                row.Cells["Col11"].Value = dataItem.Col11;
+                row.Cells["Col12"].Value = dataItem.Col12;
+                row.Cells["Col13"].Value = dataItem.Col13;
+                row.Cells["Col14"].Value = dataItem.Col14;
+                row.Cells["Col15"].Value = dataItem.Col15;
+                row.Cells["Col16"].Value = dataItem.Col16;
+                row.Cells["Col17"].Value = dataItem.Col17;
+                row.Cells["Col18"].Value = dataItem.Col18;
+            }
 
             tableForm.Controls.Add(dgv);
             tableForm.ShowDialog();
@@ -1987,6 +2243,7 @@ namespace ZontSpecExtractor
 
         private async void LoadFiles(string[] filePaths)
         {
+            // Очистка интерфейса перед стартом
             dataGridView.Rows.Clear();
             data.Clear();
             _rawHits.Clear();
@@ -2001,25 +2258,299 @@ namespace ZontSpecExtractor
                 return;
             }
 
-            
-            UpdateStatus("⚙️ Идет сканирование Excel-файла...");
-            await Task.Run(() =>
+            UpdateStatus("⏳ Идет сканирование Excel-файла...");
+
+            try
             {
-                foreach (var path in filePaths)
+                await Task.Run(() =>
                 {
-                    // ТЕПЕРЬ ТИПЫ СОВПАДАЮТ
-                    var hits = ScanSpecificSheet(path);
-                    _rawHits.AddRange(hits);
+                    foreach (var path in filePaths)
+                    {
+                        // Сканируем только те листы, которые выбрали в ПЕРВОМ диалоге 
+                        // (ScanSpecificSheet берет их из AppSettings.SearchConfig.TargetSheetNames)
+                        var hits = ScanSpecificSheet(path);
+                        _rawHits.AddRange(hits);
+                    }
+                });
+
+                // 1. Агрегируем сырые данные (_rawHits) в формат для основного просмотра
+                data = GroupRawHitsForVisio(_rawHits);
+
+                // 2. Обновляем таблицу на главной форме
+                UpdateDataGridView();
+                ShowResultMessage(_rawHits.Count);
+
+                // Примечание: _visioSourceSheetName сейчас просто хранится в памяти 
+                // и будет использован при нажатии кнопки "Создать таблицу".
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка при чтении файла: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                UpdateStatus("Ошибка загрузки.");
+            }
+
+            var rowsData = _rawHits
+        .Where(h => h.ConditionMet)
+        .GroupBy(h => new { h.SheetName, h.RowIndex })
+        .Select(g => new
+        {
+            SortSheet = g.Key.SheetName,
+            SortRow = g.Key.RowIndex,
+            Position = g.FirstOrDefault(x => string.IsNullOrEmpty(x.TargetColumn) || x.TargetColumn == "Position")?.FullItemName,
+            Col4 = g.FirstOrDefault(x => x.TargetColumn == "Col4")?.FullItemName,
+            Col5 = g.FirstOrDefault(x => x.TargetColumn == "Col5")?.FullItemName,
+            Col6 = g.FirstOrDefault(x => x.TargetColumn == "Col6")?.FullItemName,
+            Col7 = g.FirstOrDefault(x => x.TargetColumn == "Col7")?.FullItemName,
+            Col12 = g.FirstOrDefault(x => x.TargetColumn == "Col12")?.FullItemName,
+            Col14 = g.FirstOrDefault(x => x.TargetColumn == "Col14")?.FullItemName,
+            Col13 = g.FirstOrDefault(x => x.TargetColumn == "Col13")?.FullItemName,
+            Col15 = g.FirstOrDefault(x => x.TargetColumn == "Col15")?.FullItemName
+        })
+        .ToList();
+
+            if (!rowsData.Any())
+            {
+                MessageBox.Show("Не найдено данных для формирования таблицы.");
+                return;
+            }
+
+            // Функция парсинга приоритета
+            double GetPriority(string? val)
+            {
+                if (string.IsNullOrEmpty(val)) return 999999.0;
+                if (double.TryParse(val.Replace(",", "."), NumberStyles.Any, CultureInfo.InvariantCulture, out double res))
+                    return res;
+                return 999999.0;
+            }
+
+            // Сбор данных из разных колонок в один список
+            var listFrom4 = rowsData.Where(x => !string.IsNullOrWhiteSpace(x.Col4)).Select(x => new
+            { Name = x.Col4, PriorityRaw = x.Col5, PriorityVal = GetPriority(x.Col5), SourcePos = x.Position });
+            var listFrom6 = rowsData.Where(x => !string.IsNullOrWhiteSpace(x.Col6)).Select(x => new
+            { Name = x.Col6, PriorityRaw = x.Col7, PriorityVal = GetPriority(x.Col7), SourcePos = x.Position });
+            var listFrom12 = rowsData.Where(x => !string.IsNullOrWhiteSpace(x.Col12)).Select(x => new
+            { Name = x.Col12, PriorityRaw = x.Col14, PriorityVal = GetPriority(x.Col14), SourcePos = x.Position });
+            var listFrom13 = rowsData.Where(x => !string.IsNullOrWhiteSpace(x.Col13)).Select(x => new
+            { Name = x.Col13, PriorityRaw = x.Col15, PriorityVal = GetPriority(x.Col15), SourcePos = x.Position });
+
+            var finalQueue = listFrom4
+                .Concat(listFrom6)
+                .Concat(listFrom12)
+                .Concat(listFrom13)
+                .OrderBy(x => x.PriorityVal)
+                .ToList();
+
+            // =================================================================================
+            // 2. НАСТРОЙКА ТАБЛИЦЫ (ПОЛНАЯ ПЕРЕЗАГРУЗКА КОЛОНОК)
+            // =================================================================================
+            mainDgv = this.dataGridView;
+            if (mainDgv != null)
+            {
+                mainDgv.AutoGenerateColumns = false;
+                mainDgv.Columns.Clear();
+
+                // --- ДОБАВИТЬ ЭТИ СТРОКИ ДЛЯ КОПИРОВАНИЯ ---
+                // 1. Разрешаем копирование (EnableAlwaysIncludeHeaderText копирует и заголовки, удобно для Excel)
+                mainDgv.ClipboardCopyMode = DataGridViewClipboardCopyMode.EnableWithoutHeaderText;
+
+                // 2. Разрешаем выделять несколько строк или ячеек
+                mainDgv.MultiSelect = true;
+
+                // 3. Режим выделения: RowHeaderSelect позволяет выделять и строки целиком (нажав слева), и отдельные ячейки
+                mainDgv.SelectionMode = DataGridViewSelectionMode.RowHeaderSelect;        // Удаляем всё, что было раньше
+
+                // Создаем 5 чистых колонок
+                mainDgv.Columns.Add("BlockNum", "№");
+                mainDgv.Columns.Add("Terminals", "Клеммы");
+                mainDgv.Columns.Add("BlockName", "Наименование блока");
+                mainDgv.Columns.Add("SourcePos", "Позиция из КП");
+                mainDgv.Columns.Add("PriorityVal", "Приоритет");
+
+                // Настройка ширины (для красоты)
+                mainDgv.Columns["BlockNum"].Width = 40;
+                mainDgv.Columns["Terminals"].Width = 80;
+                mainDgv.Columns["BlockName"].Width = 250;
+                mainDgv.Columns["SourcePos"].Width = 60;
+                mainDgv.Columns["PriorityVal"].Width = 60;
+
+                mainDgv.Rows.Clear();
+
+                // =================================================================================
+                // 3. ОСНОВНОЙ ЦИКЛ ЗАПОЛНЕНИЯ
+                // =================================================================================
+
+                // Поиск индекса ПОСЛЕДНЕГО Управл./Перекл. для вставки минуса внутри списка
+                int lastSwitchIndex = finalQueue.FindLastIndex(x =>
+                    (x.Name ?? "").Contains("Управл.", StringComparison.OrdinalIgnoreCase) ||
+                    (x.Name ?? "").Contains("Перекл.", StringComparison.OrdinalIgnoreCase)
+                );
+
+                // Проверяем, есть ли вообще "Перекл." в списке (для финала таблицы)
+                bool hasPereklForFooter = finalQueue.Any(x => (x.Name ?? "").Contains("Перекл.", StringComparison.OrdinalIgnoreCase));
+
+                int currentTerminalCounter = 3; // Начинаем с 3-й клеммы
+                int sensorsInGroup = 0;         // Счётчик для группировки датчиков
+
+                // Функция: это датчик?
+                bool IsSensorRow(string name)
+                {
+                    if (string.IsNullOrEmpty(name)) return false;
+                    // Ordinal - чувствителен к регистру, но "Т" и "Дв" обычно пишутся с большой.
+                    // Если нужно нечувствительно - используйте OrdinalIgnoreCase
+                    return name.Contains("Т", StringComparison.Ordinal) ||
+                           name.Contains("Дв", StringComparison.Ordinal);
                 }
-            });
 
-            // 1. Агрегируем сырые данные (_rawHits) в формат, нужный для Visio (data)
-            data = GroupRawHitsForVisio(_rawHits); // <--- ВЫЗОВ НОВОЙ ФУНКЦИИ
+                for (int i = 0; i < finalQueue.Count; i++)
+                {
+                    var item = finalQueue[i];
+                    string name = item.Name ?? "";
 
-            // 2. Обновляем основной DataGridView (который показывает агрегированные данные для Visio)
-            UpdateDataGridView();
-            ShowResultMessage(data.Count);
+                    // --- 3.1 Добавляем основную строку ---
+                    int r = mainDgv.Rows.Add();
+                    var row = mainDgv.Rows[r];
+
+                    // Расчет клемм
+                    string terminalValue = "";
+                    if (name.Contains("Питание 220В", StringComparison.OrdinalIgnoreCase))
+                    {
+                        terminalValue = "1, 2";
+                    }
+                    else if (name.Contains("Смеситель", StringComparison.OrdinalIgnoreCase) ||
+                             name.Contains("Управл.", StringComparison.OrdinalIgnoreCase) ||
+                             name.Contains("Перекл.", StringComparison.OrdinalIgnoreCase) ||
+                             name.Contains("Д. давления", StringComparison.OrdinalIgnoreCase))
+                    {
+                        terminalValue = $"{currentTerminalCounter}, {currentTerminalCounter + 1}";
+                        currentTerminalCounter += 2;
+                    }
+                    else
+                    {
+                        terminalValue = currentTerminalCounter.ToString();
+                        currentTerminalCounter += 1;
+                    }
+
+                    // Заполнение
+                    row.Cells["BlockNum"].Value = r + 1;
+                    row.Cells["Terminals"].Value = terminalValue;
+                    row.Cells["BlockName"].Value = item.Name;
+                    row.Cells["SourcePos"].Value = item.SourcePos;
+                    row.Cells["PriorityVal"].Value = item.PriorityRaw;
+
+                    // --- 3.2 ЛОГИКА ВСТАВКИ ПРОМЕЖУТОЧНЫХ МИНУСОВ ---
+                    bool minusAdded = false;
+
+                    // А) Логика для датчиков Т/Дв
+                    if (IsSensorRow(name))
+                    {
+                        sensorsInGroup++;
+
+                        // Сколько датчиков осталось впереди?
+                        int remainingSensors = 0;
+                        for (int j = i + 1; j < finalQueue.Count; j++)
+                        {
+                            if (IsSensorRow(finalQueue[j].Name)) remainingSensors++;
+                        }
+
+                        bool needMinus = false;
+
+                        if (sensorsInGroup == 2)
+                        {
+                            // Если остался ровно 1 датчик, не ставим минус (делаем тройку)
+                            if (remainingSensors == 1) needMinus = false;
+                            else needMinus = true;
+                        }
+                        else if (sensorsInGroup == 3)
+                        {
+                            // Если накопили 3 (значит пропустили шаг на 2), ставим минус
+                            needMinus = true;
+                        }
+
+                        if (needMinus)
+                        {
+                            AddMinusRow(mainDgv, ref currentTerminalCounter);
+                            sensorsInGroup = 0;
+                            minusAdded = true;
+                        }
+                    }
+
+                    // Б) Логика после последнего Управл./Перекл.
+                    if (!minusAdded && lastSwitchIndex != -1 && i == lastSwitchIndex)
+                    {
+                        AddMinusRow(mainDgv, ref currentTerminalCounter);
+                    }
+                }
+
+                // =================================================================================
+                // 4. "ПОДВАЛ" ТАБЛИЦЫ (ЕСЛИ ЕСТЬ "ПЕРЕКЛ.")
+                // =================================================================================
+                if (hasPereklForFooter)
+                {
+                    // 1. Минус -12В (GND)
+                    AddRowManual(mainDgv, ref currentTerminalCounter, "Минус -12В (GND)", 1);
+
+                    // 2. Питание +12В
+                    AddRowManual(mainDgv, ref currentTerminalCounter, "Питание +12В", 1);
+
+                    // 3. Шина связи RS485 (Занимает 2 клеммы!)
+                    AddRowManual(mainDgv, ref currentTerminalCounter, "Шина связи RS485", 2);
+                }
+
+                mainDgv.Refresh();
+            }
+            else
+            {
+                MessageBox.Show("Не удалось найти главную таблицу.");
+            }
         }
+
+        // =================================================================================
+        // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
+        // =================================================================================
+
+        // 1. Метод для вставки обычного "автоматического" минуса
+        private void AddMinusRow(DataGridView dgv, ref int terminalCounter)
+        {
+            int r = dgv.Rows.Add();
+            var row = dgv.Rows[r];
+
+            // Занимаем 1 клемму
+            string term = terminalCounter.ToString();
+            terminalCounter += 1;
+
+            row.Cells["BlockNum"].Value = r + 1;
+            row.Cells["Terminals"].Value = term;
+            row.Cells["BlockName"].Value = "Минус -12В (GND)";
+            row.Cells["SourcePos"].Value = "";
+            row.Cells["PriorityVal"].Value = "";
+        }
+
+        // 2. Универсальный метод для добавления строки в конце (для RS485 и питания)
+        private void AddRowManual(DataGridView dgv, ref int terminalCounter, string name, int terminalsCount)
+        {
+            int r = dgv.Rows.Add();
+            var row = dgv.Rows[r];
+
+            string termString = "";
+            if (terminalsCount == 1)
+            {
+                termString = terminalCounter.ToString();
+                terminalCounter += 1;
+            }
+            else // Если 2 клеммы
+            {
+                termString = $"{terminalCounter}, {terminalCounter + 1}";
+                terminalCounter += 2;
+            }
+
+            row.Cells["BlockNum"].Value = r + 1;
+            row.Cells["Terminals"].Value = termString;
+            row.Cells["BlockName"].Value = name;
+            row.Cells["SourcePos"].Value = "";
+            row.Cells["PriorityVal"].Value = "";
+        }
+
+        // Вспомогательный метод для добавления строки с минусом (чтобы не дублировать код)
 
         private List<Dictionary<string, string>> GroupRawHitsForVisio(List<RawExcelHit> rawHits)
         {
@@ -2117,180 +2648,325 @@ namespace ZontSpecExtractor
         // --- НОВЫЙ МЕТОД: Поиск, вывод содержимого и подсчет схожих ячеек ---
         // --- НОВЫЙ МЕТОД: Поиск, вывод содержимого и подсчет схожих ячеек ---
         // ИЗМЕНЕНИЕ 1: Меняем возвращаемый тип
+        // =============================================================
+        // МЕТОД 1: Загрузка "Карты Клемм" (Приоритетов) из спец. листа
+        // =============================================================
+        private void LoadPrioritiesFromVisioSheet(OfficeOpenXml.ExcelPackage package)
+        {
+            _visioPriorityMap.Clear();
+
+            // 1. Ищем лист с приоритетами (по ключевому слову VISIO)
+            var sheet = package.Workbook.Worksheets["1.ТЗ на ОБЪЕКТ ZONT для VISIO"];
+            if (sheet == null)
+            {
+                sheet = package.Workbook.Worksheets.FirstOrDefault(w => w.Name.ToUpper().Contains("VISIO"));
+            }
+
+            if (sheet == null) return; // Листа нет — приоритеты не работают, не страшно
+
+            int startRow = 2; // Пропускаем шапку
+            int endRow = sheet.Dimension?.End.Row ?? 100;
+
+            for (int r = startRow; r <= endRow; r++)
+            {
+                // Колонка 1 (A): Наименование (напр. "Насос отопления")
+                // Колонка 2 (B): Номер клеммы (напр. "3" или "Клемма 3")
+                string name = sheet.Cells[r, 1].Text.Trim().ToLower();
+                string valStr = sheet.Cells[r, 2].Text.Trim();
+
+                if (string.IsNullOrEmpty(name)) continue;
+
+                int priority = 9999;
+
+                // Вытаскиваем только цифры из ячейки (чтобы "Кл. 3" превратилось в 3)
+                string digits = new string(valStr.Where(char.IsDigit).ToArray());
+
+                if (int.TryParse(digits, out int p))
+                {
+                    priority = p;
+                }
+                else
+                {
+                    // Если номера нет, берем номер строки * 100 (чтобы сохранить порядок таблицы)
+                    priority = r * 100;
+                }
+
+                if (!_visioPriorityMap.ContainsKey(name))
+                {
+                    _visioPriorityMap.Add(name, priority);
+                }
+            }
+        }
+
+        // =============================================================
+        // МЕТОД 2: Основной сканер (С внедренной логикой SchematicOrder)
+        // =============================================================
+
+        private bool IsRowExcluded(int currentRow, string exclusionRule)
+        {
+            if (string.IsNullOrWhiteSpace(exclusionRule)) return false;
+
+            // Разбиваем строку по запятым
+            var parts = exclusionRule.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+            foreach (var part in parts)
+            {
+                string p = part.Trim();
+
+                // Проверяем формат "229-" (от числа и до конца)
+                if (p.EndsWith("-"))
+                {
+                    string numberPart = p.TrimEnd('-');
+                    if (int.TryParse(numberPart, out int startLimit))
+                    {
+                        if (currentRow >= startLimit) return true; // Исключить, если строка больше или равна
+                    }
+                }
+                // Проверяем формат "10" (конкретная строка)
+                else
+                {
+                    if (int.TryParse(p, out int specificRow))
+                    {
+                        if (currentRow == specificRow) return true; // Исключить конкретную строку
+                    }
+                }
+            }
+            return false;
+        }
+
         private List<RawExcelHit> ScanSpecificSheet(string filePath)
         {
             var rawHits = new List<RawExcelHit>();
-
-            // Лицензия EPPlus
             OfficeOpenXml.ExcelPackage.LicenseContext = OfficeOpenXml.LicenseContext.NonCommercial;
 
             try
             {
+                // 1. Открываем Основной файл (где проверяем условия)
                 using (var package = new ExcelPackage(new FileInfo(filePath)))
                 {
-                    // Определяем листы для поиска
-                    var targetSheets = AppSettings.SearchConfig.TargetSheetNames;
-                    if (targetSheets == null || !targetSheets.Any())
+                    try { LoadPrioritiesFromVisioSheet(package); } catch { }
+
+                    // 2. Открываем Дополнительный файл (откуда берем значения)
+                    ExcelPackage auxPackage = null;
+                    string auxPath = AppSettings.SearchConfig.AuxFilePath;
+
+                    if (!string.IsNullOrEmpty(auxPath) && File.Exists(auxPath))
                     {
-                        targetSheets = package.Workbook.Worksheets.Select(w => w.Name).ToList();
+                        try
+                        {
+                            auxPackage = new ExcelPackage(new FileInfo(auxPath));
+                        }
+                        catch (Exception ex)
+                        {
+                            // Можно вывести сообщение, если файл битый
+                            System.Diagnostics.Debug.WriteLine($"Ошибка открытия доп. файла: {ex.Message}");
+                        }
                     }
 
-                    foreach (var sheetName in targetSheets)
+                    try
                     {
-                        var ws = package.Workbook.Worksheets[sheetName];
-                        if (ws == null || ws.Dimension == null) continue;
-
-                        int startRow = ws.Dimension.Start.Row;
-                        int endRow = ws.Dimension.End.Row;
-
-                        // --- ЦИКЛ ПО СТРОКАМ EXCEL ---
-                        for (int row = startRow; row <= endRow; row++)
+                        var targetSheets = AppSettings.SearchConfig.TargetSheetNames;
+                        if (targetSheets == null || !targetSheets.Any())
                         {
-                            // --- ЦИКЛ ПО ПРАВИЛАМ ПОИСКА ---
-                            foreach (var rule in AppSettings.SearchConfig.Rules)
+                            targetSheets = package.Workbook.Worksheets
+                                .Where(w => !w.Name.ToUpper().Contains("VISIO"))
+                                .Select(w => w.Name).ToList();
+                        }
+
+                        foreach (var sheetName in targetSheets)
+                        {
+                            // --- ОСНОВНОЙ ЛИСТ (Для условий) ---
+                            var mainSheet = package.Workbook.Worksheets[sheetName];
+                            if (mainSheet == null || mainSheet.Dimension == null) continue;
+
+                            // --- ДОПОЛНИТЕЛЬНЫЙ ЛИСТ (Для данных) ---
+                            ExcelWorksheet auxSheet = null;
+                            if (auxPackage != null)
                             {
-                                // =========================================================
-                                // ЭТАП 0: ПРОВЕРКА ДОПОЛНИТЕЛЬНОГО УСЛОВИЯ (Condition)
-                                // =========================================================
-                                // Если галочка UseCondition стоит, мы проверяем соседнюю ячейку.
-                                // Например: Колонка "L" должна быть равна "1".
+                                // Ищем лист без учета регистра (Sheet1 == sheet1)
+                                auxSheet = auxPackage.Workbook.Worksheets
+                                    .FirstOrDefault(w => w.Name.Equals(sheetName, StringComparison.OrdinalIgnoreCase));
+                            }
 
-                                if (rule.UseCondition)
+                            int startRow = mainSheet.Dimension.Start.Row;
+                            int endRow = mainSheet.Dimension.End.Row;
+
+                            // === ЦИКЛ ПО СТРОКАМ ===
+                            for (int row = startRow; row <= endRow; row++)
+                            {
+                                foreach (var rule in AppSettings.SearchConfig.Rules)
                                 {
-                                    // Превращаем букву колонки (например "L") в номер (12)
-                                    int condColIndex = ExcelColumnLetterToNumber(rule.ConditionColumn);
+                                    // Пропуск исключенных строк
+                                    if (IsRowExcluded(row, rule.ExcludedRows)) continue;
 
-                                    if (condColIndex > 0)
+                                    bool matchFound = false;
+                                    string foundInMainTable = ""; // Для отладки или фоллбэка, если нужно
+
+                                    // =========================================================
+                                    // 1. ПРОВЕРКА УСЛОВИЯ (ТОЛЬКО В ОСНОВНОЙ ТАБЛИЦЕ)
+                                    // =========================================================
+
+                                    // Вариант А: Поиск по значению (например, "1" в колонке L)
+                                    if (rule.SearchByValue)
                                     {
-                                        // Читаем значение из ячейки условия
-                                        string actualValue = ws.Cells[row, condColIndex].Text?.Trim();
-
-                                        // Сравниваем с требуемым значением (ConditionValue)
-                                        // Используем OrdinalIgnoreCase, чтобы "1" и "1 " или "да" и "ДА" совпадали
-                                        bool isConditionMet = string.Equals(actualValue, rule.ConditionValue, StringComparison.OrdinalIgnoreCase);
-
-                                        // ЕСЛИ УСЛОВИЕ НЕ ВЫПОЛНЕНО -> ПРОПУСКАЕМ ПРАВИЛО
-                                        if (!isConditionMet)
+                                        int condColIndex = ExcelColumnLetterToNumber(rule.ConditionColumn);
+                                        if (condColIndex > 0)
                                         {
-                                            continue;
+                                            // Смотрим в MAIN SHEET
+                                            string cellValue = mainSheet.Cells[row, condColIndex].Text?.Trim();
+                                            string targetValue = string.IsNullOrEmpty(rule.ConditionValue) ? "1" : rule.ConditionValue;
+
+                                            if (string.Equals(cellValue, targetValue, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                matchFound = true;
+                                                // Запоминаем, что нашли в основной (на всякий случай), но пока не используем
+                                                int nameCol = ExcelColumnLetterToNumber(rule.SearchColumn);
+                                                if (nameCol > 0) foundInMainTable = mainSheet.Cells[row, nameCol].Text?.Trim();
+                                            }
                                         }
                                     }
-                                }
-
-                                // =========================================================
-                                // ЭТАП 1: РАЗБОР СТРОКИ ПРАВИЛА (Search Logic)
-                                // =========================================================
-                                string effectiveSearchTerms = rule.ExcelValue;
-                                string effectiveMasterName = rule.VisioMasterName;
-                                string effectiveColumn = rule.SearchColumn;
-
-                                // Логика "=" (Слово = Мастер ИЛИ Слово = Колонка = Мастер)
-                                if (!string.IsNullOrEmpty(effectiveSearchTerms) && effectiveSearchTerms.Contains("="))
-                                {
-                                    var parts = effectiveSearchTerms.Split('=');
-                                    if (parts.Length == 2)
+                                    // Вариант Б: Обычный поиск по слову (ключевые слова)
+                                    else
                                     {
-                                        effectiveSearchTerms = parts[0].Trim();
-                                        effectiveMasterName = parts[1].Trim();
+                                        // Сначала проверяем доп. условие (если есть галочка UseCondition)
+                                        bool conditionPass = true;
+                                        if (rule.UseCondition)
+                                        {
+                                            int condColIndex = ExcelColumnLetterToNumber(rule.ConditionColumn);
+                                            if (condColIndex > 0)
+                                            {
+                                                // Смотрим в MAIN SHEET
+                                                string actualValue = mainSheet.Cells[row, condColIndex].Text?.Trim();
+                                                if (!string.Equals(actualValue, rule.ConditionValue, StringComparison.OrdinalIgnoreCase))
+                                                    conditionPass = false;
+                                            }
+                                        }
+
+                                        if (conditionPass)
+                                        {
+                                            string textToSearch = "";
+                                            int colIndex = ExcelColumnLetterToNumber(rule.SearchColumn);
+
+                                            // Читаем текст из MAIN SHEET для поиска ключевых слов
+                                            if (!string.IsNullOrWhiteSpace(rule.SearchColumn) && colIndex > 0)
+                                                textToSearch = mainSheet.Cells[row, colIndex].Text?.Trim();
+                                            else
+                                            {
+                                                // Поиск по всей строке
+                                                StringBuilder sb = new StringBuilder();
+                                                for (int c = 1; c <= 20; c++) sb.Append(mainSheet.Cells[row, c].Text?.Trim() + " ");
+                                                textToSearch = sb.ToString().Trim();
+                                            }
+
+                                            if (!string.IsNullOrEmpty(textToSearch) && !string.IsNullOrEmpty(rule.ExcelValue))
+                                            {
+                                                var keywords = rule.ExcelValue.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
+                                                foreach (var key in keywords)
+                                                {
+                                                    if (textToSearch.IndexOf(key.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)
+                                                    {
+                                                        matchFound = true;
+                                                        foundInMainTable = textToSearch; // Нашли совпадение
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    else if (parts.Length == 3)
+
+                                    // =========================================================
+                                    // 2. ИЗВЛЕЧЕНИЕ РЕЗУЛЬТАТА (В ЗАВИСИМОСТИ ОТ НАСТРОЙКИ)
+                                    // =========================================================
+                                    if (matchFound)
                                     {
-                                        effectiveSearchTerms = parts[0].Trim();
-                                        effectiveColumn = parts[1].Trim();
-                                        effectiveMasterName = parts[2].Trim();
-                                    }
-                                }
+                                        string resultValue = "";
 
-                                // =========================================================
-                                // ЭТАП 2: ОПРЕДЕЛЕНИЕ ГДЕ ИСКАТЬ (Колонка или Весь ряд)
-                                // =========================================================
-                                string cellTextToSearch = "";
+                                        // СЦЕНАРИЙ: Берем из ДОПОЛНИТЕЛЬНОЙ таблицы
+                                        if (rule.ResultSource == DataSourceType.AuxFile)
+                                        {
+                                            if (auxSheet != null)
+                                            {
+                                                // Берем ТУ ЖЕ строку (row) и колонку поиска (SearchColumn)
+                                                // (или TargetColumn, если логика подразумевает иное, но обычно берут из колонки "Где искать")
+                                                int targetColIdx = ExcelColumnLetterToNumber(rule.SearchColumn);
 
-                                if (!string.IsNullOrWhiteSpace(effectiveColumn))
-                                {
-                                    // Если колонка задана (например "V"), берем текст строго оттуда
-                                    int colIndex = ExcelColumnLetterToNumber(effectiveColumn);
-                                    if (colIndex > 0)
-                                    {
-                                        cellTextToSearch = ws.Cells[row, colIndex].Text?.Trim();
-                                    }
-                                }
-                                else
-                                {
-                                    // Если колонка НЕ задана, склеиваем первые 20 ячеек строки для поиска
-                                    StringBuilder sb = new StringBuilder();
-                                    for (int c = 1; c <= 20; c++) // Ограничиваемся 20 колонками для скорости
-                                    {
-                                        var txt = ws.Cells[row, c].Text?.Trim();
-                                        if (!string.IsNullOrEmpty(txt)) sb.Append(txt + " ");
-                                    }
-                                    cellTextToSearch = sb.ToString().Trim();
-                                }
-
-                                if (string.IsNullOrEmpty(cellTextToSearch)) continue;
-
-                                // =========================================================
-                                // ЭТАП 3: ПОИСК СОВПАДЕНИЙ (Синонимы ; )
-                                // =========================================================
-                                var searchKeywords = effectiveSearchTerms.Split(new[] { ';', ',' }, StringSplitOptions.RemoveEmptyEntries);
-                                var masterNames = effectiveMasterName.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
-
-                                int matchIndex = -1;
-                                string foundRealName = "";
-
-                                for (int i = 0; i < searchKeywords.Length; i++)
-                                {
-                                    string key = searchKeywords[i].Trim();
-                                    if (string.IsNullOrEmpty(key)) continue;
-
-                                    // Ищем вхождение (Contains)
-                                    if (cellTextToSearch.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0)
-                                    {
-                                        matchIndex = i;
-                                        foundRealName = cellTextToSearch; // Сохраняем полный текст для таблицы
-                                        break;
-                                    }
-                                }
-
-                                // =========================================================
-                                // ЭТАП 4: ЕСЛИ НАШЛИ -> СОХРАНЯЕМ
-                                // =========================================================
-                                if (matchIndex >= 0)
-                                {
-                                    // Определяем мастера
-                                    string targetMaster = "";
-                                    if (masterNames.Length > 0)
-                                    {
-                                        if (matchIndex < masterNames.Length)
-                                            targetMaster = masterNames[matchIndex].Trim();
+                                                if (targetColIdx > 0)
+                                                {
+                                                    // Читаем из AUX SHEET
+                                                    resultValue = auxSheet.Cells[row, targetColIdx].Text?.Trim();
+                                                }
+                                            }
+                                            else
+                                            {
+                                                // Лист в доп файле не найден — результат ПУСТОЙ.
+                                                // Не подменяем его данными из основной таблицы!
+                                                // Можно добавить лог: Console.WriteLine($"Лист {sheetName} не найден в Aux");
+                                            }
+                                        }
+                                        // СЦЕНАРИЙ: Берем из ОСНОВНОЙ таблицы (старый режим)
                                         else
-                                            targetMaster = masterNames[0].Trim();
+                                        {
+                                            if (!string.IsNullOrEmpty(rule.VisioMasterName))
+                                                resultValue = rule.VisioMasterName; // Жесткое имя
+                                            else
+                                            {
+                                                // Берем из найденной ячейки основной таблицы
+                                                // Если мы искали по значению "1", то берем текст из колонки SearchColumn
+                                                if (rule.SearchByValue && string.IsNullOrEmpty(foundInMainTable))
+                                                {
+                                                    int nameCol = ExcelColumnLetterToNumber(rule.SearchColumn);
+                                                    if (nameCol > 0) resultValue = mainSheet.Cells[row, nameCol].Text?.Trim();
+                                                }
+                                                else
+                                                {
+                                                    resultValue = foundInMainTable;
+                                                }
+                                            }
+                                        }
+
+                                        // Если результат пустой (например, в доп таблице в этой ячейке пусто) — пропускаем
+                                        if (string.IsNullOrEmpty(resultValue)) continue;
+
+                                        // --- ДАЛЕЕ СТАНДАРТНАЯ ОБРАБОТКА (Приоритеты и добавление) ---
+                                        int finalPriority = 9999;
+                                        string nameLower = resultValue.ToLower().Trim();
+
+                                        if (_visioPriorityMap.ContainsKey(nameLower))
+                                        {
+                                            finalPriority = _visioPriorityMap[nameLower];
+                                        }
+                                        else
+                                        {
+                                            var match = _visioPriorityMap.Keys
+                                                .Where(k => nameLower.Contains(k))
+                                                .OrderByDescending(k => k.Length)
+                                                .FirstOrDefault();
+                                            if (match != null) finalPriority = _visioPriorityMap[match];
+                                        }
+
+                                        rawHits.Add(new RawExcelHit
+                                        {
+                                            SheetName = sheetName,
+                                            RowIndex = row,
+                                            FullItemName = resultValue,       // <-- Значение из нужной таблицы
+                                            TargetMasterName = resultValue,   // <-- Значение из нужной таблицы
+                                            SearchTerm = rule.ExcelValue ?? "ConditionMatch",
+                                            ConditionMet = true,
+                                            Quantity = 1,
+                                            IsLimited = rule.LimitQuantity,
+                                            FoundRule = rule,
+                                            SchematicOrder = finalPriority,
+                                            TargetColumn = rule.TargetColumn
+                                        });
                                     }
-
-                                    // Определяем количество (Попытка найти цифру в колонке "Кол-во" или просто 1)
-                                    int quantity = 1;
-                                    // TODO: Если нужно читать кол-во из Excel, добавьте логику здесь.
-                                    // Например: int qtyCol = ExcelColumnLetterToNumber("E"); 
-                                    // int.TryParse(ws.Cells[row, qtyCol].Text, out quantity);
-
-                                    // Добавляем результат
-                                    rawHits.Add(new RawExcelHit
-                                    {
-                                        SheetName = sheetName,
-                                        FullItemName = foundRealName,
-                                        SearchTerm = searchKeywords[matchIndex],
-                                        ConditionMet = true, // Мы это проверили на Этапе 0
-                                        Quantity = quantity,
-                                        IsLimited = rule.LimitQuantity,
-                                        FoundRule = rule,
-                                        TargetMasterName = targetMaster
-                                    });
-
-                                    // Прерываем цикл правил для этой строки, чтобы не дублировать
-                                    break;
                                 }
                             }
                         }
+                    }
+                    finally
+                    {
+                        // Закрываем доп. файл, чтобы не висел в памяти
+                        if (auxPackage != null) auxPackage.Dispose();
                     }
                 }
             }
@@ -2344,19 +3020,33 @@ namespace ZontSpecExtractor
             dataGridView.AutoResizeColumns(DataGridViewAutoSizeColumnsMode.AllCells);
         }
 
+        private string GetDeclension(int number, string nominative, string genitiveSingular, string genitivePlural)
+        {
+            number = Math.Abs(number) % 100;
+            var n1 = number % 10;
+            if (number > 10 && number < 20) return genitivePlural;
+            if (n1 > 1 && n1 < 5) return genitiveSingular;
+            if (n1 == 1) return nominative;
+            return genitivePlural;
+        }
+
         private void ShowResultMessage(int totalFound)
         {
-            if (totalFound > 0)
+
+            int count = _rawHits.Count;
+            string word = GetDeclension(count, "позиция", "позиции", "позиций");
+            if (count > 0)
             {
-                UpdateStatus($"✅ Сканирование завершено. Найдено {totalFound} позиций.");
+                UpdateStatus($"? Сканирование завершено. Найдено {count} {word}.");
             }
             else
             {
-                UpdateStatus("⚠️ Сканирование завершено. Соответствующие позиции не найдены.");
+                UpdateStatus("? Сканирование завершено. Ничего не найдено.");
+                MessageBox.Show("Ничего не найдено. Проверьте настройки поиска.", "Результат", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
-        
+
 
         private void GeneratePage(Visio.Document doc, string pageName, Dictionary<string, int> masterCounts, List<SearchRule> SearchRules)
         {
@@ -2662,17 +3352,57 @@ namespace ZontSpecExtractor
 
         private async void OpenVisioClick(object? sender, EventArgs e)
         {
-            if (_rawHits == null || !_rawHits.Any())
+            // Проверяем, создана ли таблица
+            if (mainDgv == null || mainDgv.Rows.Count == 0)
             {
-                MessageBox.Show("Нет данных! Сначала нажмите 'Загрузить Excel'.");
+                MessageBox.Show("Сначала создайте таблицу (кнопка 'Создать таблицу')!", "Ошибка");
                 return;
             }
 
             this.Enabled = false;
-            UpdateStatus("⏳ Запуск Visio...");
+            UpdateStatus("⏳ Подготовка данных из таблицы...");
 
-            // Копируем данные для потока
-            var hitsToProcess = _rawHits.ToList();
+            var tableHits = new List<RawExcelHit>();
+
+            foreach (DataGridViewRow row in mainDgv.Rows)
+            {
+                if (row.IsNewRow) continue;
+
+                // 1. Читаем имя блока (Колонка 3 - "BlockName" или индекс 2)
+                var cellValue = row.Cells["BlockName"].Value?.ToString(); // Или row.Cells[2].Value
+
+                // 2. Читаем номер п/п для сортировки (Колонка 1 - "№" или индекс 0)
+                // Если там пусто или не число, ставим 0 или int.MaxValue (в конец)
+                int sortOrder = int.MaxValue;
+                var sortVal = row.Cells[0].Value?.ToString(); // Предполагаем, что № в 0-й колонке
+                if (int.TryParse(sortVal, out int parsedOrder))
+                {
+                    sortOrder = parsedOrder;
+                }
+
+                if (!string.IsNullOrWhiteSpace(cellValue))
+                {
+                    tableHits.Add(new RawExcelHit
+                    {
+                        SearchTerm = cellValue.Trim(),
+                        Quantity = 1,
+                        ConditionMet = true,
+                        SortIndex = sortOrder // Запоминаем номер
+                    });
+                }
+            }
+
+            // ВАЖНО: Сортируем список по возрастанию номера п/п перед отправкой
+            tableHits = tableHits.OrderBy(h => h.SortIndex).ToList();
+
+            if (!tableHits.Any())
+            {
+                MessageBox.Show("В таблице нет данных в колонке 'Наименование блока'.");
+                this.Enabled = true;
+                return;
+            }
+
+            UpdateStatus("⏳ Запуск Visio...");
 
             await Task.Run(() =>
             {
@@ -2683,7 +3413,7 @@ namespace ZontSpecExtractor
                     visioApp.Visible = true;
                     var doc = visioApp.Documents.Add("");
 
-                    // 1. Открываем ВСЕ трафареты заранее
+                    // Открываем трафареты из всех конфигов
                     var allStencils = AppSettings.LabelingConfig.StencilFilePaths
                         .Union(AppSettings.SchemeConfig.StencilFilePaths)
                         .Union(AppSettings.CabinetConfig.StencilFilePaths)
@@ -2696,10 +3426,20 @@ namespace ZontSpecExtractor
                         visioApp.Documents.OpenEx(path, (short)Visio.VisOpenSaveArgs.visOpenDocked);
                     }
 
-                    // 2. Генерируем страницы (Прямой COM Interop)
-                    GeneratePageDirectly(doc, "Маркировка", hitsToProcess, AppSettings.LabelingConfig);
-                    GeneratePageDirectly(doc, "Схема", hitsToProcess, AppSettings.SchemeConfig);
-                    GeneratePageDirectly(doc, "Шкаф", hitsToProcess, AppSettings.CabinetConfig);
+                    // === ГЕНЕРАЦИЯ 3-Х ЛИСТОВ ===
+                    // Функция GeneratePageDirectly сама проверит:
+                    // 1. Есть ли имя блока из таблицы в маппинге этого конфига (Tab 2)
+                    // 2. Если есть -> возьмет MasterName
+                    // 3. Возьмет настройки координат/отступов из SequentialDrawing (Tab 3) и разместит
+
+                    UpdateStatus("Рисуем Маркировку...");
+                    GeneratePageDirectly(doc, "Маркировка", tableHits, AppSettings.LabelingConfig);
+
+                    UpdateStatus("Рисуем Схему...");
+                    GeneratePageDirectly(doc, "Схема", tableHits, AppSettings.SchemeConfig);
+
+                    UpdateStatus("Рисуем Шкаф...");
+                    GeneratePageDirectly(doc, "Шкаф", tableHits, AppSettings.CabinetConfig);
 
                     UpdateStatus("✅ Visio готово.");
                 }
@@ -2713,6 +3453,8 @@ namespace ZontSpecExtractor
             this.Enabled = true;
         }
 
+        // Внутри класса Form1
+
         private void GeneratePageDirectly(Visio.Document doc, string pageName, List<RawExcelHit> hits, VisioConfiguration config)
         {
             Visio.Page page = null;
@@ -2720,13 +3462,11 @@ namespace ZontSpecExtractor
             {
                 try { page = doc.Pages.get_ItemU(pageName); }
                 catch { page = doc.Pages.Add(); page.Name = pageName; }
-
-                // Применяем настройки (размер, ориентация)
                 SetupVisioPage(page, config);
             }
             catch { return; }
 
-            // --- 1. ФИКСИРОВАННЫЕ ФИГУРЫ (Manual) ---
+            // --- 1. ФИКСИРОВАННЫЕ ФИГУРЫ (Predefined) ---
             if (config.PredefinedMasterConfigs != null)
             {
                 foreach (var fixedItem in config.PredefinedMasterConfigs)
@@ -2743,8 +3483,7 @@ namespace ZontSpecExtractor
 
                     for (int i = 0; i < fixedItem.Quantity; i++)
                     {
-                        // Сначала бросаем в (0,0)
-                        Visio.Shape shp = DropShapeOnPage(page, fixedItem.MasterName, 0, 0, 1, true);
+                        Visio.Shape shp = DropShapeOnPage(page, fixedItem.MasterName, 0, 0);
 
                         if (shp != null)
                         {
@@ -2755,196 +3494,318 @@ namespace ZontSpecExtractor
                 }
             }
 
-            // --- 2. НАЙДЕННЫЕ ФИГУРЫ (Sequential / Поток) ---
-            if (config.SequentialDrawing.Enabled && hits != null && hits.Any())
+            // --- 2. НАЙДЕННЫЕ ФИГУРЫ (Поиск по карте) ---
+            // --- 2. НАЙДЕННЫЕ ФИГУРЫ (Sequential) ---
+            if (config.SearchRules != null && config.SearchRules.Any() && hits != null && hits.Any())
             {
-                double startX = 10, startY = 200;
+                bool seqEnabled = config.SequentialDrawing.Enabled;
+
+                // Начальные координаты в ММ
+                double curX_MM = 10;
+                double curY_MM = 200;
+
+                // Парсим стартовые координаты из настроек
                 var sCoords = config.SequentialDrawing.StartCoordinatesXY?.Split(new[] { ',', ';' });
                 if (sCoords != null && sCoords.Length >= 2)
                 {
-                    double.TryParse(sCoords[0].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out startX);
-                    double.TryParse(sCoords[1].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out startY);
+                    double.TryParse(sCoords[0].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out curX_MM);
+                    double.TryParse(sCoords[1].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out curY_MM);
                 }
 
-                double curX = startX;
-                double curY = startY;
-                double maxW = config.SequentialDrawing.MaxLineWidthMM;
-                double hGap = config.SequentialDrawing.HorizontalStepMM;
-                double vGap = config.SequentialDrawing.VerticalStepMM;
-                double rowMaxH = 0;
+                double maxW_MM = config.SequentialDrawing.MaxLineWidthMM;
+                double hGap_MM = config.SequentialDrawing.HorizontalStepMM;
+                double vGap_MM = config.SequentialDrawing.VerticalStepMM;
 
-                // ГРУППИРОВКА ПО МАСТЕРУ
-                // Используем TargetMasterName, чтобы разные слова могли вести к разным (или одинаковым) фигурам
-                var groupedHits = hits
-                    .Where(h => h.ConditionMet)
-                    .GroupBy(h => new
-                    {
-                        Rule = h.FoundRule,
-                        // Если TargetMasterName определен (новый код), используем его. Иначе fallback.
-                        MasterName = !string.IsNullOrEmpty(h.TargetMasterName) ? h.TargetMasterName :
-                                     (h.FoundRule != null ? h.FoundRule.VisioMasterName : h.SearchTerm)
-                    });
+                // Глобальный якорь из выпадающего списка (например "TopLeft" или "Center")
+                string globalAnchor = !string.IsNullOrWhiteSpace(config.SequentialDrawing.Anchor)
+                                      ? config.SequentialDrawing.Anchor
+                                      : "Center";
 
-                foreach (var group in groupedHits)
+                double startX_MM = curX_MM;
+                double rowMaxH_MM = 0;
+
+                foreach (var hit in hits)
                 {
-                    var rule = group.Key.Rule;
-                    string masterName = group.Key.MasterName;
+                    if (!hit.ConditionMet || string.IsNullOrWhiteSpace(hit.SearchTerm)) continue;
 
-                    if (string.IsNullOrWhiteSpace(masterName)) continue;
+                    // Ищем правило (содержит текст)
+                    var matchedRule = config.SearchRules.FirstOrDefault(r =>
+                        !string.IsNullOrEmpty(r.ExcelValue) &&
+                        hit.SearchTerm.IndexOf(r.ExcelValue, StringComparison.OrdinalIgnoreCase) >= 0);
 
-                    // Считаем количество
-                    int countToDraw = (rule != null && rule.LimitQuantity) ? 1 : group.Sum(h => h.Quantity);
-
-                    for (int i = 0; i < countToDraw; i++)
+                    if (matchedRule != null && !string.IsNullOrWhiteSpace(matchedRule.VisioMasterName))
                     {
-                        Visio.Shape shp = DropShapeOnPage(page, masterName, 0, 0, 1, true);
+                        int countToDraw = matchedRule.LimitQuantity ? 1 : hit.Quantity;
 
-                        if (shp != null)
+                        for (int i = 0; i < countToDraw; i++)
                         {
-                            double wMM = shp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
-                            double hMM = shp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+                            // Кидаем фигуру на лист (пока в произвольное место, т.к. Drop требует дюймы, а у нас логика Anchor сложнее)
+                            Visio.Shape shp = DropShapeOnPage(page, matchedRule.VisioMasterName, 0, 0);
 
-                            // Перенос строки
-                            if ((curX + wMM - startX) > maxW)
+                            if (shp != null)
                             {
-                                curX = startX;
-                                curY -= (rowMaxH + vGap);
-                                rowMaxH = 0;
+                                // Приоритет якоря: Правило -> Глобальная настройка -> Center
+                                string finalAnchor = !string.IsNullOrWhiteSpace(matchedRule.Anchor)
+                                                     ? matchedRule.Anchor
+                                                     : globalAnchor;
+
+                                if (seqEnabled)
+                                {
+                                    // Получаем размеры фигуры в ММ
+                                    double wShape_MM = shp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    double hShape_MM = shp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+
+                                    // Проверка переноса строки (Змейка)
+                                    if ((curX_MM + wShape_MM - startX_MM) > maxW_MM)
+                                    {
+                                        curX_MM = startX_MM;
+                                        curY_MM -= (rowMaxH_MM + vGap_MM); // Спускаемся вниз
+                                        rowMaxH_MM = 0;
+                                    }
+
+                                    // СТАВИМ ФИГУРУ
+                                    SetShapePosition(shp, curX_MM, curY_MM, finalAnchor);
+
+                                    // Сдвигаем курсор вправо
+                                    curX_MM += wShape_MM + hGap_MM;
+
+                                    if (hShape_MM > rowMaxH_MM) rowMaxH_MM = hShape_MM;
+                                }
+                                else
+                                {
+                                    // Если не змейка, берем координаты из правила
+                                    double rX = 0, rY = 0;
+                                    var rCoords = matchedRule.CoordinatesXY?.Split(',');
+                                    if (rCoords != null && rCoords.Length >= 2)
+                                    {
+                                        double.TryParse(rCoords[0].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out rX);
+                                        double.TryParse(rCoords[1].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out rY);
+                                    }
+                                    SetShapePosition(shp, rX, rY, finalAnchor);
+                                }
                             }
-
-                            string anchor = !string.IsNullOrWhiteSpace(rule.Anchor) ? rule.Anchor : config.SequentialDrawing.Anchor;
-                            if (string.IsNullOrWhiteSpace(anchor)) anchor = "Center";
-
-                            SetShapePosition(shp, curX, curY, anchor);
-
-                            curX += wMM + hGap;
-                            if (hMM > rowMaxH) rowMaxH = hMM;
                         }
                     }
                 }
             }
 
-            // --- 3. ОЧИСТКА ПУСТЫХ СТРАНИЦ ---
-            // Удаляем стандартную "Страница-1", если она пустая и мы создали другие страницы
+            // Удаление пустой первой страницы
             try
             {
+                // Проверяем первый лист (индексация в Visio с 1)
                 if (doc.Pages.Count > 1)
                 {
-                    // Visio нумерует страницы с 1
-                    var firstPage = doc.Pages[1];
-                    // Проверка имен на разных языках
-                    if ((firstPage.Name.StartsWith("Page") || firstPage.Name.StartsWith("Страница"))
-                        && firstPage.Shapes.Count == 0)
+                    Visio.Page firstPage = doc.Pages[1];
+
+                    // Удаляем ТОЛЬКО если имя похоже на стандартное ("Page-1", "Страница-1") И она пустая
+                    // Это защитит ваши листы "Маркировка" и т.д. от удаления
+                    string name = firstPage.Name;
+                    if ((name.StartsWith("Page") || name.StartsWith("Страница")) && firstPage.Shapes.Count == 0)
                     {
                         firstPage.Delete(0);
                     }
                 }
             }
-            catch { /* Ошибка удаления игнорируется */ }
-        }
-
-        private void SetShapePosition(Visio.Shape shape, double xMM, double yMM, string anchor)
-        {
-            // 1. Получаем размеры в миллиметрах
-            double w = shape.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
-            double h = shape.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
-
-            // --- ЛЕЧЕНИЕ ГЛЮКОВ (Нормализация фигуры) ---
-            // Принудительно ставим Локальный Пин (точку вращения/привязки внутри фигуры) в её ЦЕНТР.
-            // Это исправляет ситуацию, когда "Center ведет себя как TopLeft".
-            if (shape.get_CellExists("LocPinX", 0) != 0)
-                shape.get_CellsU("LocPinX").FormulaU = "Width*0.5";
-            if (shape.get_CellExists("LocPinY", 0) != 0)
-                shape.get_CellsU("LocPinY").FormulaU = "Height*0.5";
-            // -------------------------------------------
-
-            double finalX = xMM;
-            double finalY = yMM;
-
-            // Приводим к нижнему регистру для надежности
-            switch (anchor?.ToLower().Replace("-", "").Trim())
+            catch (Exception ex)
             {
-                case "topleft":
-                    // Если x,y - это Левый-Верхний угол:
-                    // Пин (Центр) должен быть правее на w/2 и ниже на h/2
-                    finalX = xMM + (w / 2.0);
-                    finalY = yMM - (h / 2.0);
-                    break;
-
-                case "bottomleft":
-                    // Если x,y - это Левый-Нижний угол:
-                    // Пин (Центр) должен быть правее на w/2 и выше на h/2
-                    finalX = xMM + (w / 2.0);
-                    finalY = yMM + (h / 2.0);
-                    break;
-
-                case "topright":
-                    finalX = xMM - (w / 2.0);
-                    finalY = yMM - (h / 2.0);
-                    break;
-
-                case "bottomright":
-                    finalX = xMM - (w / 2.0);
-                    finalY = yMM + (h / 2.0);
-                    break;
-
-                case "center":
-                default:
-                    // Если x,y - это Центр, и мы нормализовали LocPin выше,
-                    // то координаты не меняем.
-                    finalX = xMM;
-                    finalY = yMM;
-                    break;
+                Console.WriteLine("Ошибка при удалении пустой страницы: " + ex.Message);
             }
+            // ======================================================
 
-            // Применяем координаты (Visio всегда использует PinX/PinY для позиционирования на листе)
-            shape.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters] = finalX;
-            shape.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters] = finalY;
+            UpdateStatus("✅ Visio готово.");
         }
 
-        // Вспомогательный метод для вставки одной фигуры
-        private Visio.Shape? DropShapeOnPage(Visio.Page page, string masterName, double xMM, double yMM, int qty, bool isSequential = false)
+        // --- УЛУЧШЕННЫЙ МЕТОД ВСТАВКИ ФИГУРЫ ---
+        private Visio.Shape? DropShapeOnPage(Visio.Page page, string masterName, double xMM, double yMM)
         {
+            // 1. Проверка входных данных
+            if (string.IsNullOrWhiteSpace(masterName)) return null;
+            masterName = masterName.Trim();
+
             Visio.Master? mst = null;
             Visio.Document doc = page.Document;
+            Visio.Application app = doc.Application;
 
-            // 1. Ищем мастер в самом документе
-            try { mst = doc.Masters.get_ItemU(masterName); } catch { }
+            // --- ЛОКАЛЬНАЯ ФУНКЦИЯ ДЛЯ ПОИСКА ---
+            // Пытается найти сначала по универсальному имени (NameU), затем по локальному (Name)
+            Visio.Master? TryGetMaster(Visio.Document d, string name)
+            {
+                // 1. Приоритет: Универсальное имя (ItemU)
+                try
+                {
+                    return d.Masters.get_ItemU(name);
+                }
+                catch { }
 
-            // 2. Если нет, ищем во всех открытых трафаретах
+                // 2. Резерв: Локальное имя через индексатор [ ]
+                // Важно: здесь нельзя использовать get_Item()
+                try
+                {
+                    return d.Masters[name];
+                }
+                catch { }
+
+                return null;
+            }
+            // -------------------------------------
+
+            // 2. Ищем в текущем документе
+            mst = TryGetMaster(doc, masterName);
+
+            // 3. Если не нашли, перебираем открытые трафареты
             if (mst == null)
             {
-                foreach (Visio.Document d in doc.Application.Documents)
+                foreach (Visio.Document d in app.Documents)
                 {
+                    // Работаем только с трафаретами (.vssx, .vss)
                     if (d.Type == Visio.VisDocumentTypes.visTypeStencil)
                     {
-                        try { mst = d.Masters.get_ItemU(masterName); } catch { }
-                        if (mst != null) break;
+                        mst = TryGetMaster(d, masterName);
+                        if (mst != null) break; // Нашли — выходим из цикла
                     }
                 }
             }
 
+            // 4. Если мастер так и не найден — выход
+            if (mst == null) return null;
+
+            // 5. Вставка фигуры (конвертация MM -> Inch)
+            try
+            {
+                const double MM_TO_INCH = 1.0 / 25.4;
+                return page.Drop(mst, xMM * MM_TO_INCH, yMM * MM_TO_INCH);
+            }
+            catch (Exception)
+            {
+                // Логирование ошибки можно добавить сюда
+                return null;
+            }
+        }
+
+        private void SetShapePosition(Visio.Shape shp, double xMM, double yMM, string anchor)
+{
+    if (shp == null) return;
+
+    // 1. Формируем строки с единицами измерения "mm" для Visio
+    // Это самый надежный способ избежать путаницы дюймы/мм
+    string sX = xMM.ToString(CultureInfo.InvariantCulture) + " mm";
+    string sY = yMM.ToString(CultureInfo.InvariantCulture) + " mm";
+
+    // 2. Настраиваем Anchor (Точку привязки ВНУТРИ фигуры - LocPin)
+    // FormulaU позволяет писать "Width*0" и т.д.
+    switch (anchor?.ToLower())
+    {
+        case "topleft":
+            shp.CellsU["LocPinX"].FormulaU = "Width*0"; // Левый край
+            shp.CellsU["LocPinY"].FormulaU = "Height*1"; // Верхний край
+            break;
+        case "topcenter":
+            shp.CellsU["LocPinX"].FormulaU = "Width*0.5";
+            shp.CellsU["LocPinY"].FormulaU = "Height*1";
+            break;
+        case "topright":
+            shp.CellsU["LocPinX"].FormulaU = "Width*1";
+            shp.CellsU["LocPinY"].FormulaU = "Height*1";
+            break;
+        case "centerleft":
+            shp.CellsU["LocPinX"].FormulaU = "Width*0";
+            shp.CellsU["LocPinY"].FormulaU = "Height*0.5";
+            break;
+        case "centerright":
+            shp.CellsU["LocPinX"].FormulaU = "Width*1";
+            shp.CellsU["LocPinY"].FormulaU = "Height*0.5";
+            break;
+        case "bottomleft":
+            shp.CellsU["LocPinX"].FormulaU = "Width*0";
+            shp.CellsU["LocPinY"].FormulaU = "Height*0";
+            break;
+        case "bottomcenter":
+            shp.CellsU["LocPinX"].FormulaU = "Width*0.5";
+            shp.CellsU["LocPinY"].FormulaU = "Height*0";
+            break;
+        case "bottomright":
+            shp.CellsU["LocPinX"].FormulaU = "Width*1";
+            shp.CellsU["LocPinY"].FormulaU = "Height*0";
+            break;
+        case "center":
+        default:
+            shp.CellsU["LocPinX"].FormulaU = "Width*0.5";
+            shp.CellsU["LocPinY"].FormulaU = "Height*0.5";
+            break;
+    }
+
+    // 3. Ставим саму фигуру в координаты на листе (Pin)
+    shp.CellsU["PinX"].FormulaU = sX;
+    shp.CellsU["PinY"].FormulaU = sY;
+}
+
+        // Вспомогательный метод для вставки одной фигуры
+        private Visio.Shape? DropShapeOnPage(Visio.Page page, string masterName, double xMM, double yMM, int qty, bool isSequential = false)
+        {
+            if (string.IsNullOrWhiteSpace(masterName)) return null;
+
+            masterName = masterName.Trim();
+            Visio.Master? mst = null;
+            Visio.Document doc = page.Document;
+            Visio.Application app = doc.Application;
+
+            // --- 1. Ищем мастер в самом документе ---
+
+            // Попытка А: По универсальному имени (NameU)
+            try { mst = doc.Masters.get_ItemU(masterName); } catch { }
+
+            // Попытка Б: По локальному имени (Name) через индексатор [ ]
             if (mst == null)
             {
-                // Не нашли мастера — можно логировать ошибку
+                try { mst = doc.Masters[masterName]; } catch { }
+            }
+
+            // --- 2. Если нет, ищем во всех открытых трафаретах ---
+            if (mst == null)
+            {
+                foreach (Visio.Document d in app.Documents)
+                {
+                    // Проверяем только трафареты (Type = 2, visTypeStencil)
+                    if (d.Type == Visio.VisDocumentTypes.visTypeStencil)
+                    {
+                        // Попытка А: NameU
+                        try { mst = d.Masters.get_ItemU(masterName); } catch { }
+
+                        // Попытка Б: Name через индексатор [ ]
+                        if (mst == null)
+                        {
+                            try { mst = d.Masters[masterName]; } catch { }
+                        }
+
+                        if (mst != null) break; // Нашли!
+                    }
+                }
+            }
+
+            // --- 3. Если так и не нашли ---
+            if (mst == null)
+            {
+                // Можно раскомментировать для отладки
+                // Console.WriteLine($"Мастер '{masterName}' не найден.");
                 return null;
             }
 
+            // --- 4. Вставка фигур ---
             Visio.Shape? lastShape = null;
             const double MM_TO_INCH = 1.0 / 25.4;
 
-            for (int i = 0; i < qty; i++)
+            try
             {
-                // Drop использует дюймы. PinX/PinY по умолчанию в центре фигуры
-                // Если это Sequential, мы корректируем координаты в вызывающем коде, здесь просто ставим
-
-                // Получаем размеры мастера чтобы скорректировать точку вставки (если Anchor TopLeft)
-                // Но проще бросить, а потом подвинуть.
-
-                lastShape = page.Drop(mst, xMM * MM_TO_INCH, yMM * MM_TO_INCH);
-
-                // Для Sequential режим выравнивания обрабатывается в цикле выше
-                // Для Manual можно добавить обработку Anchor здесь, если нужно
+                for (int i = 0; i < qty; i++)
+                {
+                    // Drop использует дюймы
+                    lastShape = page.Drop(mst, xMM * MM_TO_INCH, yMM * MM_TO_INCH);
+                }
+            }
+            catch (Exception ex)
+            {
+                // Логирование ошибки вставки, если нужно
+                Console.WriteLine($"Ошибка при Drop: {ex.Message}");
             }
 
             return lastShape;
@@ -3097,7 +3958,7 @@ namespace ZontSpecExtractor
 
             if (!masterMap.Any())
             {
-                UpdateStatus("⚠️ MasterMap пуст! Невозможно сопоставить данные.");
+                UpdateStatus("?? MasterMap пуст! Невозможно сопоставить данные.");
                 return visioData;
             }
 
@@ -3131,16 +3992,16 @@ namespace ZontSpecExtractor
                     };
 
                     visioData.Add(newItem);
-                    UpdateStatus($"  ✅ Сопоставлено: '{bestMatch}' -> '{visioMasterName}'");
+                    UpdateStatus($"  ? Сопоставлено: '{bestMatch}' -> '{visioMasterName}'");
                 }
 
                 if (!matched)
                 {
-                    UpdateStatus($"  ❌ Не сопоставлено: '{cleanedContent}'");
+                    UpdateStatus($"  ? Не сопоставлено: '{cleanedContent}'");
                 }
             }
 
-            UpdateStatus($"✅ Сопоставление завершено. Найдено {mappedItems} из {totalItems} позиций.");
+            UpdateStatus($"? Сопоставление завершено. Найдено {mappedItems} из {totalItems} позиций.");
             return visioData;
         }
 
@@ -3172,7 +4033,7 @@ namespace ZontSpecExtractor
 
             try
             {
-                UpdateStatus("🔥 Начало генерации объединенного Visio-файла...");
+                UpdateStatus("?? Начало генерации объединенного Visio-файла...");
 
                 // ИСПРАВЛЕНО: 
                 // 1. Убраны лишние вызовы RulesToMap, так как PrepareVisioData делает это внутри.
@@ -3209,16 +4070,16 @@ namespace ZontSpecExtractor
                     visioApp.ActiveWindow.Page = pageScheme;
                 }
 
-                UpdateStatus($"✅ Файл Visio успешно сгенерирован и открыт");
+                UpdateStatus($"? Файл Visio успешно сгенерирован и открыт");
             }
             catch (System.Runtime.InteropServices.COMException ex)
             {
-                UpdateStatus($"❌ COM Ошибка Visio: {ex.Message}");
+                UpdateStatus($"? COM Ошибка Visio: {ex.Message}");
                 MessageBox.Show($"COM Ошибка Visio: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             catch (Exception ex)
             {
-                UpdateStatus($"❌ Общая ошибка при генерации Visio: {ex.Message}");
+                UpdateStatus($"? Общая ошибка при генерации Visio: {ex.Message}");
                 MessageBox.Show($"Общая ошибка при генерации Visio: {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
             finally
@@ -3300,23 +4161,23 @@ namespace ZontSpecExtractor
                     {
                         if (!System.IO.File.Exists(path))
                         {
-                            UpdateStatus($"❌ ОШИБКА: Файл трафарета не существует: {path}");
+                            UpdateStatus($"? ОШИБКА: Файл трафарета не существует: {path}");
                             continue;
                         }
 
                         Visio.Document stencilDoc = page.Application.Documents.Open(path);
                         openStencils.Add(stencilDoc);
-                        UpdateStatus($"✅ Трафарет открыт: {Path.GetFileName(path)}");
+                        UpdateStatus($"? Трафарет открыт: {Path.GetFileName(path)}");
                     }
                     catch (Exception ex)
                     {
-                        UpdateStatus($"❌ КРИТИЧЕСКАЯ ОШИБКА открытия трафарета '{Path.GetFileName(path)}': {ex.Message}");
+                        UpdateStatus($"? КРИТИЧЕСКАЯ ОШИБКА открытия трафарета '{Path.GetFileName(path)}': {ex.Message}");
                     }
                 }
 
                 if (!openStencils.Any())
                 {
-                    UpdateStatus("❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть ни один трафарет Visio. Прерывание.");
+                    UpdateStatus("? КРИТИЧЕСКАЯ ОШИБКА: Не удалось открыть ни один трафарет Visio. Прерывание.");
                     return;
                 }
 
@@ -3407,11 +4268,11 @@ namespace ZontSpecExtractor
                                 }
                             }
 
-                            UpdateStatus($"  ✅ Добавлена предопределенная фигура: '{predefinedMasterName}'");
+                            UpdateStatus($"  ? Добавлена предопределенная фигура: '{predefinedMasterName}'");
                         }
                         catch (Exception ex)
                         {
-                            UpdateStatus($"❌ Ошибка размещения предопределенного мастера '{predefinedMasterName}': {ex.Message}");
+                            UpdateStatus($"? Ошибка размещения предопределенного мастера '{predefinedMasterName}': {ex.Message}");
                         }
                     }
                     else
@@ -3441,7 +4302,7 @@ namespace ZontSpecExtractor
                     if (!allAvailableMasterNames.Contains(masterName))
                     {
                         if (!mastersNotFound.Contains(masterName)) mastersNotFound.Add(masterName);
-                        UpdateStatus($"❌ Мастер '{masterName}' отсутствует в списке доступных фигур.");
+                        UpdateStatus($"? Мастер '{masterName}' отсутствует в списке доступных фигур.");
                         continue;
                     }
 
@@ -3463,7 +4324,7 @@ namespace ZontSpecExtractor
                     {
                         // Это маловероятная ошибка (значит COM-объект не может быть получен)
                         if (!mastersNotFound.Contains(masterName)) mastersNotFound.Add(masterName);
-                        UpdateStatus($"❌ Не удалось получить COM-объект мастера '{masterName}', хотя он был найден в списке.");
+                        UpdateStatus($"? Не удалось получить COM-объект мастера '{masterName}', хотя он был найден в списке.");
                         continue;
                     }
 
@@ -3489,7 +4350,7 @@ namespace ZontSpecExtractor
                     }
                     catch (Exception ex)
                     {
-                        UpdateStatus($"❌ Ошибка размещения мастера '{masterName}': {ex.Message}");
+                        UpdateStatus($"? Ошибка размещения мастера '{masterName}': {ex.Message}");
                     }
                     finally
                     {
@@ -3497,7 +4358,7 @@ namespace ZontSpecExtractor
                     }
                 }
 
-                UpdateStatus($"✅ Размещение фигур на странице '{page.Name}' завершено.");
+                UpdateStatus($"? Размещение фигур на странице '{page.Name}' завершено.");
 
                 // 4. ВЫВОД СООБЩЕНИЯ О НЕЙДЕННЫХ МАСТЕРАХ
                 if (mastersNotFound.Any())
@@ -3511,7 +4372,7 @@ namespace ZontSpecExtractor
 
                     MessageBox.Show(
                         this,
-                        "❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось разместить следующие фигуры (Мастера):\n\n" +
+                        "? КРИТИЧЕСКАЯ ОШИБКА: Не удалось разместить следующие фигуры (Мастера):\n\n" +
                         $"ИСКОМЫЕ ФИГУРЫ:\n{missingMastersList}\n\n" +
                         "==========================================================\n" +
                         "ДОСТУПНЫЕ ФИГУРЫ В ТРАФАРЕТАХ (Master.NameU):\n" +
@@ -3702,7 +4563,7 @@ namespace ZontSpecExtractor
     public class SheetSelectionForm : Form
     {
         private readonly CheckedListBox _clbSheets;
-        public List<string> SelectedSheets { get; private set; } = new List<string>();
+        public List<string> SelectedSheets { get; private set; } = new List<string> { "1.ТЗ на объект ZONT для VISIO" };
 
         public SheetSelectionForm(List<string> allSheetNames, List<string> initialSelectedSheets)
         {
@@ -3740,7 +4601,7 @@ namespace ZontSpecExtractor
                 bool isChecked = initialSelectedSheets.Contains(sheetName, StringComparer.OrdinalIgnoreCase);
                 _clbSheets.Items.Add(sheetName, isChecked);
             }
-            
+
             // Кнопки
             var footerFlow = new FlowLayoutPanel
             {
@@ -3763,6 +4624,7 @@ namespace ZontSpecExtractor
             footerFlow.Controls.Add(btnOk);
         }
     }
+
 }
 
 
