@@ -16,6 +16,7 @@ using ZontSpecExtractor.Properties;
 using static ZontSpecExtractor.Form1;
 using Visio = Microsoft.Office.Interop.Visio;
 using Microsoft.VisualBasic;
+using System.Diagnostics.Metrics;
 
 
 namespace ZontSpecExtractor
@@ -1435,6 +1436,46 @@ namespace ZontSpecExtractor
             }
         }
 
+        private bool SetShapeData(Visio.Shape shape, string labelToFind, string newValue)
+        {
+            if (shape == null || string.IsNullOrWhiteSpace(newValue)) return false;
+
+            try
+            {
+                // Проверяем наличие секции свойств
+                if (shape.get_SectionExists((short)Visio.VisSectionIndices.visSectionProp, (short)Visio.VisExistsFlags.visExistsAnywhere) == 0)
+                    return false;
+
+                short propSection = (short)Visio.VisSectionIndices.visSectionProp;
+                short rowCount = shape.get_RowCount(propSection);
+
+                for (short row = 0; row < rowCount; row++)
+                {
+                    // Получаем метку (Label)
+                    Visio.Cell labelCell = shape.get_CellsSRC(propSection, row, (short)Visio.VisCellIndices.visCustPropsLabel);
+                    string label = labelCell.get_ResultStr("");
+
+                    // Сравниваем название поля
+                    if (string.Equals(label.Trim(), labelToFind.Trim(), StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Формируем значение для записи
+                        string formulaVal = "\"" + newValue.Replace("\"", "\"\"") + "\"";
+
+                        Visio.Cell valueCell = shape.get_CellsSRC(propSection, row, (short)Visio.VisCellIndices.visCustPropsValue);
+                        valueCell.FormulaU = formulaVal;
+
+                        return true; // УСПЕХ: Поле найдено и обновлено
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Ошибка записи данных фигуры: {ex.Message}");
+            }
+
+            return false; // Поле не найдено
+        }
+
         // ПРИМЕЧАНИЕ: Вызовите этот метод (SetupVisioPage) **сразу** после создания страницы Visio.
         // Например, если страница создается в другом месте:
         // Visio.Page page = newDoc.Pages.Add();
@@ -2389,32 +2430,83 @@ namespace ZontSpecExtractor
                 bool hasPereklForFooter = finalQueue.Any(x => (x.Name ?? "").Contains("Перекл.", StringComparison.OrdinalIgnoreCase));
 
                 int currentTerminalCounter = 3; // Начинаем с 3-й клеммы
-                int sensorsInGroup = 0;         // Счётчик для группировки датчиков
+                int sensorsInGroup = 0;         // Счётчик текущей группы датчиков (0, 1, 2...)
 
                 // Функция: это датчик?
                 bool IsSensorRow(string name)
                 {
                     if (string.IsNullOrEmpty(name)) return false;
-                    // Ordinal - чувствителен к регистру, но "Т" и "Дв" обычно пишутся с большой.
-                    // Если нужно нечувствительно - используйте OrdinalIgnoreCase
                     return name.Contains("Т", StringComparison.Ordinal) ||
                            name.Contains("Дв", StringComparison.Ordinal);
                 }
 
+                string GetSmartBoilerName(string currentBlockName, string sourcePosName)
+                {
+                    if (string.IsNullOrWhiteSpace(sourcePosName) || string.IsNullOrWhiteSpace(currentBlockName))
+                        return currentBlockName;
+
+                    try
+                    {
+                        // Ищем паттерн: слово "котел", пробелы, цифра "1", пробелы, (тут модель), (реле)
+                        // RegexOptions.IgnoreCase - чтобы не зависеть от регистра
+                        var regex = new System.Text.RegularExpressions.Regex(
+                            @"котел\s+1\s+(.*?)\(?реле\)?",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+                        var match = regex.Match(sourcePosName);
+
+                        if (match.Success)
+                        {
+                            // Группа 1 - это то, что попало между "котел 1" и "реле"
+                            string modelName = match.Groups[1].Value.Trim();
+
+                            if (!string.IsNullOrEmpty(modelName))
+                            {
+                                // Заменяем цифру "1" как отдельное слово (\b1\b) на название модели
+                                // Это предотвращает замену единиц внутри других чисел (например, 12В не пострадает)
+                                return System.Text.RegularExpressions.Regex.Replace(currentBlockName, @"\b1\b", modelName);
+                            }
+                        }
+                    }
+                    catch { }
+
+                    return currentBlockName;
+                } 
+           
+
                 for (int i = 0; i < finalQueue.Count; i++)
                 {
                     var item = finalQueue[i];
-                    string name = item.Name ?? "";
 
-                    // --- 3.1 Добавляем основную строку ---
+                    // 1. ПОЛУЧАЕМ "УМНОЕ" ИМЯ
+                    // Если в исходной позиции (SourcePos) есть модель котла, она подставится вместо "1"
+                    string originalName = item.Name ?? "";
+                    string name = GetSmartBoilerName(originalName, item.SourcePos ?? "");
+
+                    bool isSensor = IsSensorRow(name);
+
+                    // --- 3.1 ВСТАВКА МИНУСА (ПЕРЕД ДАТЧИКАМИ) ---
+                    if (isSensor)
+                    {
+                        if (sensorsInGroup == 0)
+                        {
+                            AddMinusRow(mainDgv, ref currentTerminalCounter);
+                        }
+                    }
+                    else
+                    {
+                        sensorsInGroup = 0;
+                    }
+
+                    // --- 3.2 Добавляем основную строку ---
                     int r = mainDgv.Rows.Add();
                     var row = mainDgv.Rows[r];
 
-                    // Расчет клемм
+                    // Расчет клемм (используем уже новое имя name)
                     string terminalValue = "";
                     if (name.Contains("Питание 220В", StringComparison.OrdinalIgnoreCase))
                     {
-                        terminalValue = "1, 2";
+                        terminalValue = "1";
                     }
                     else if (name.Contains("Смеситель", StringComparison.OrdinalIgnoreCase) ||
                              name.Contains("Управл.", StringComparison.OrdinalIgnoreCase) ||
@@ -2433,51 +2525,35 @@ namespace ZontSpecExtractor
                     // Заполнение
                     row.Cells["BlockNum"].Value = r + 1;
                     row.Cells["Terminals"].Value = terminalValue;
-                    row.Cells["BlockName"].Value = item.Name;
+
+                    // ВАЖНО: Записываем в таблицу новое имя с Buderus
+                    row.Cells["BlockName"].Value = name;
+
                     row.Cells["SourcePos"].Value = item.SourcePos;
                     row.Cells["PriorityVal"].Value = item.PriorityRaw;
 
-                    // --- 3.2 ЛОГИКА ВСТАВКИ ПРОМЕЖУТОЧНЫХ МИНУСОВ ---
-                    bool minusAdded = false;
-
-                    // А) Логика для датчиков Т/Дв
-                    if (IsSensorRow(name))
+                    // --- 3.3 УПРАВЛЕНИЕ ГРУППИРОВКОЙ ДАТЧИКОВ ---
+                    if (isSensor)
                     {
                         sensorsInGroup++;
-
-                        // Сколько датчиков осталось впереди?
-                        int remainingSensors = 0;
-                        for (int j = i + 1; j < finalQueue.Count; j++)
+                        int sensorsAhead = 0;
+                        // Для проверки следующих строк нам не нужно менять их имена, 
+                        // достаточно проверить исходные IsSensorRow, так как "Т" или "Дв" не меняются при замене котла
+                        for (int k = i + 1; k < finalQueue.Count; k++)
                         {
-                            if (IsSensorRow(finalQueue[j].Name)) remainingSensors++;
+                            string nextName = finalQueue[k].Name ?? ""; // берем сырое имя для проверки типа
+                            if (IsSensorRow(nextName)) sensorsAhead++;
+                            else break;
                         }
-
-                        bool needMinus = false;
 
                         if (sensorsInGroup == 2)
                         {
-                            // Если остался ровно 1 датчик, не ставим минус (делаем тройку)
-                            if (remainingSensors == 1) needMinus = false;
-                            else needMinus = true;
+                            if (sensorsAhead != 1) sensorsInGroup = 0;
                         }
-                        else if (sensorsInGroup == 3)
+                        else if (sensorsInGroup >= 3)
                         {
-                            // Если накопили 3 (значит пропустили шаг на 2), ставим минус
-                            needMinus = true;
-                        }
-
-                        if (needMinus)
-                        {
-                            AddMinusRow(mainDgv, ref currentTerminalCounter);
                             sensorsInGroup = 0;
-                            minusAdded = true;
                         }
-                    }
-
-                    // Б) Логика после последнего Управл./Перекл.
-                    if (!minusAdded && lastSwitchIndex != -1 && i == lastSwitchIndex)
-                    {
-                        AddMinusRow(mainDgv, ref currentTerminalCounter);
                     }
                 }
 
@@ -3523,12 +3599,17 @@ namespace ZontSpecExtractor
 
                 double startX_MM = curX_MM;
                 double rowMaxH_MM = 0;
+                int qfCounter = 2;         // Автоматы (QF2...)
+                int blockLabelCounter = 3; // Клеммы (3, 4...)
+                int sensorCounter = 1;     // Датчики (1, 2, 3...)
+
+                // Ключевые слова для разделения нумерации клемм
+                string[] splitKeywords = new[] { "Перекл.", "Смеситель", "Управл.", "давления" };
 
                 foreach (var hit in hits)
                 {
                     if (!hit.ConditionMet || string.IsNullOrWhiteSpace(hit.SearchTerm)) continue;
 
-                    // Ищем правило (содержит текст)
                     var matchedRule = config.SearchRules.FirstOrDefault(r =>
                         !string.IsNullOrEmpty(r.ExcelValue) &&
                         hit.SearchTerm.IndexOf(r.ExcelValue, StringComparison.OrdinalIgnoreCase) >= 0);
@@ -3539,41 +3620,64 @@ namespace ZontSpecExtractor
 
                         for (int i = 0; i < countToDraw; i++)
                         {
-                            // Кидаем фигуру на лист (пока в произвольное место, т.к. Drop требует дюймы, а у нас логика Anchor сложнее)
+                            // 1. Бросаем ОСНОВНУЮ фигуру
                             Visio.Shape shp = DropShapeOnPage(page, matchedRule.VisioMasterName, 0, 0);
 
                             if (shp != null)
                             {
-                                // Приоритет якоря: Правило -> Глобальная настройка -> Center
-                                string finalAnchor = !string.IsNullOrWhiteSpace(matchedRule.Anchor)
-                                                     ? matchedRule.Anchor
-                                                     : globalAnchor;
+                                // --- А. ЗАПОЛНЕНИЕ ДАННЫХ ---
+
+                                // 1. Наименование
+                                SetShapeData(shp, "Наименование блоков", hit.SearchTerm);
+
+                                // 2. Нумерация автоматов (если есть поле "Номер автомата")
+                                if (SetShapeData(shp, "Номер автомата", $"QF{qfCounter}"))
+                                {
+                                    qfCounter++;
+                                }
+
+                                // 3. === НОВОЕ: Нумерация датчиков (если есть поле "Номер датчика") ===
+                                // Начинаем с 1. Если записали успешно — увеличиваем.
+                                if (SetShapeData(shp, "Номер датчика", sensorCounter.ToString()))
+                                {
+                                    sensorCounter++;
+                                }
+
+                                // --- Б. ПОЗИЦИОНИРОВАНИЕ ОСНОВНОЙ ФИГУРЫ ---
+                                string finalAnchor = !string.IsNullOrWhiteSpace(matchedRule.Anchor) ? matchedRule.Anchor : globalAnchor;
+
+                                double mainW_MM = 0;
+                                double mainH_MM = 0;
+                                double mainPinX_MM = 0;
+                                double mainPinY_MM = 0;
 
                                 if (seqEnabled)
                                 {
-                                    // Получаем размеры фигуры в ММ
-                                    double wShape_MM = shp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
-                                    double hShape_MM = shp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    // Змейка
+                                    mainW_MM = shp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    mainH_MM = shp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    double rightBoundary = startX_MM + maxW_MM;
 
-                                    // Проверка переноса строки (Змейка)
-                                    if ((curX_MM + wShape_MM - startX_MM) > maxW_MM)
+                                    if (curX_MM + mainW_MM > rightBoundary)
                                     {
                                         curX_MM = startX_MM;
-                                        curY_MM -= (rowMaxH_MM + vGap_MM); // Спускаемся вниз
+                                        double stepDown = (rowMaxH_MM > 0 ? rowMaxH_MM : mainH_MM) + vGap_MM;
+                                        curY_MM -= stepDown;
                                         rowMaxH_MM = 0;
                                     }
 
-                                    // СТАВИМ ФИГУРУ
-                                    SetShapePosition(shp, curX_MM, curY_MM, finalAnchor);
+                                    mainPinX_MM = curX_MM + (mainW_MM / 2.0);
+                                    mainPinY_MM = curY_MM - (mainH_MM / 2.0);
 
-                                    // Сдвигаем курсор вправо
-                                    curX_MM += wShape_MM + hGap_MM;
+                                    shp.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters] = mainPinX_MM;
+                                    shp.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters] = mainPinY_MM;
 
-                                    if (hShape_MM > rowMaxH_MM) rowMaxH_MM = hShape_MM;
+                                    curX_MM += mainW_MM + hGap_MM;
+                                    if (mainH_MM > rowMaxH_MM) rowMaxH_MM = mainH_MM;
                                 }
                                 else
                                 {
-                                    // Если не змейка, берем координаты из правила
+                                    // Статика
                                     double rX = 0, rY = 0;
                                     var rCoords = matchedRule.CoordinatesXY?.Split(',');
                                     if (rCoords != null && rCoords.Length >= 2)
@@ -3582,6 +3686,78 @@ namespace ZontSpecExtractor
                                         double.TryParse(rCoords[1].Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out rY);
                                     }
                                     SetShapePosition(shp, rX, rY, finalAnchor);
+
+                                    mainW_MM = shp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    mainH_MM = shp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    mainPinX_MM = shp.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters];
+                                    mainPinY_MM = shp.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters];
+                                }
+
+                                // --- В. ДОБАВЛЕНИЕ НУМЕРАЦИИ КЛЕММ (Только для листа "Схемы") ---
+                                if (pageName.IndexOf("Схем", StringComparison.OrdinalIgnoreCase) >= 0)
+                                {
+                                    // Проверяем, нужно ли делить блок на 2 части
+                                    bool splitBlock = splitKeywords.Any(k => hit.SearchTerm.IndexOf(k, StringComparison.OrdinalIgnoreCase) >= 0);
+
+                                    if (splitBlock)
+                                    {
+                                        // === ВАРИАНТ А: ДВЕ ПОЛОВИНКИ ===
+                                        double halfWidth = mainW_MM / 2.0;
+                                        double topEdgeY = mainPinY_MM + (mainH_MM / 2.0);
+
+                                        // Левая половинка
+                                        Visio.Shape leftLbl = DropShapeOnPage(page, "0.Нумера БЛОКОВ таблицы", 0, 0);
+                                        if (leftLbl != null)
+                                        {
+                                            leftLbl.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters] = halfWidth;
+                                            double lblH = leftLbl.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+
+                                            double leftPinX = mainPinX_MM - (mainW_MM / 4.0);
+                                            double lblPinY = topEdgeY - (lblH / 2.0);
+
+                                            leftLbl.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters] = leftPinX;
+                                            leftLbl.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters] = lblPinY;
+
+                                            SetShapeData(leftLbl, "Нумерация клемм", blockLabelCounter.ToString());
+                                            blockLabelCounter++;
+                                        }
+
+                                        // Правая половинка
+                                        Visio.Shape rightLbl = DropShapeOnPage(page, "0.Нумера БЛОКОВ таблицы", 0, 0);
+                                        if (rightLbl != null)
+                                        {
+                                            rightLbl.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters] = halfWidth;
+                                            double lblH = rightLbl.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+
+                                            double rightPinX = mainPinX_MM + (mainW_MM / 4.0);
+                                            double lblPinY = topEdgeY - (lblH / 2.0);
+
+                                            rightLbl.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters] = rightPinX;
+                                            rightLbl.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters] = lblPinY;
+
+                                            SetShapeData(rightLbl, "Нумерация клемм", blockLabelCounter.ToString());
+                                            blockLabelCounter++;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // === ВАРИАНТ Б: ОДИН ЦЕЛЫЙ БЛОК ===
+                                        Visio.Shape labelShp = DropShapeOnPage(page, "0.Нумера БЛОКОВ таблицы", 0, 0);
+                                        if (labelShp != null)
+                                        {
+                                            labelShp.Cells["Width"].Result[Visio.VisUnitCodes.visMillimeters] = mainW_MM;
+                                            double labelH_MM = labelShp.Cells["Height"].Result[Visio.VisUnitCodes.visMillimeters];
+
+                                            double topEdgeY = mainPinY_MM + (mainH_MM / 2.0);
+                                            double newLabelPinY = topEdgeY - (labelH_MM / 2.0);
+
+                                            labelShp.Cells["PinX"].Result[Visio.VisUnitCodes.visMillimeters] = mainPinX_MM;
+                                            labelShp.Cells["PinY"].Result[Visio.VisUnitCodes.visMillimeters] = newLabelPinY;
+
+                                            SetShapeData(labelShp, "Нумерация клемм", blockLabelCounter.ToString());
+                                            blockLabelCounter++;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -3589,8 +3765,8 @@ namespace ZontSpecExtractor
                 }
             }
 
-            // Удаление пустой первой страницы
-            try
+                // Удаление пустой первой страницы
+                try
             {
                 // Проверяем первый лист (индексация в Visio с 1)
                 if (doc.Pages.Count > 1)
