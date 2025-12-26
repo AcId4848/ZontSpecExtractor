@@ -10,9 +10,9 @@
 		<AssemblyName>ZontSpecExtractor</AssemblyName>
 		<RootNamespace>ZontSpecExtractor</RootNamespace>
 		<ApplicationIcon>avklogo.ico</ApplicationIcon>
-		<Version>1.1.0.0</Version>
-		<AssemblyVersion>1.1.0.0</AssemblyVersion>
-		<FileVersion>1.1.0.0</FileVersion>
+		<Version>2.1.0.0</Version>
+		<AssemblyVersion>2.1.0.0</AssemblyVersion>
+		<FileVersion>2.1.0.0</FileVersion>
 	</PropertyGroup>
 
 	<ItemGroup>
