@@ -1,0 +1,118 @@
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.exe
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.deps.json
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.runtimeconfig.json
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.pdb
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\EPPlus.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\EPPlus.Interfaces.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\EPPlus.System.Drawing.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.Abstractions.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.FileExtensions.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.Json.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileProviders.Abstractions.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileProviders.Physical.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileSystemGlobbing.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Primitives.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.IO.RecyclableMemoryStream.dll
+C:\Users\user\source\repos\ZontSpecExtractor\bin\Debug\net8.0-windows7.0\Microsoft.Vbe.Interop.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.AssemblyReference.cache
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.VisioViewer.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.Visio.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.Visio.SaveAsWeb.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.VisOcx.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.VBIDE.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.VBScript_RegExp_55.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\Interop.Office.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.ResolveComReference.cache
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.Properties.Resources.resources
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.GenerateResource.cache
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.AssemblyInfoInputs.cache
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.AssemblyInfo.cs
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.CoreCompileInputs.cache
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.sourcelink.json
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpec.D426ACA6.Up2Date
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\refint\ZontSpecExtractor.dll
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.pdb
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.genruntimeconfig.cache
+C:\Users\user\source\repos\ZontSpecExtractor\obj\Debug\net8.0-windows7.0\ref\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.AssemblyReference.cache
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.VisioViewer.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.Visio.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.Visio.SaveAsWeb.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.VisOcx.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.VBIDE.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.VBScript_RegExp_55.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\Interop.Office.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.ResolveComReference.cache
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.Properties.Resources.resources
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.GenerateResource.cache
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.AssemblyInfoInputs.cache
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.AssemblyInfo.cs
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.CoreCompileInputs.cache
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\refint\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.pdb
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.exe
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.deps.json
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.runtimeconfig.json
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.pdb
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\EPPlus.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\EPPlus.Interfaces.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\EPPlus.System.Drawing.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.Abstractions.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.FileExtensions.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.Json.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileProviders.Abstractions.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileProviders.Physical.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileSystemGlobbing.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Primitives.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.IO.RecyclableMemoryStream.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\bin\Debug\net8.0-windows7.0\Microsoft.Vbe.Interop.dll
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpec.D426ACA6.Up2Date
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.genruntimeconfig.cache
+C:\Users\JUSTI\Desktop\ZONTExtractor\Новая папка\obj\Debug\net8.0-windows7.0\ref\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.AssemblyReference.cache
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\refint\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.pdb
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.exe
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.deps.json
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.runtimeconfig.json
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\ZontSpecExtractor.pdb
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\EPPlus.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\EPPlus.Interfaces.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\EPPlus.System.Drawing.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.Abstractions.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.FileExtensions.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Configuration.Json.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileProviders.Abstractions.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileProviders.Physical.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.FileSystemGlobbing.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Extensions.Primitives.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.IO.RecyclableMemoryStream.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\bin\Debug\net8.0-windows7.0\Microsoft.Vbe.Interop.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.VisioViewer.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.Visio.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.Visio.SaveAsWeb.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.Microsoft.Office.Interop.VisOcx.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.VBIDE.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.VBScript_RegExp_55.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\Interop.Office.dll
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.ResolveComReference.cache
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.Properties.Resources.resources
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.GenerateResource.cache
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.AssemblyInfoInputs.cache
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.AssemblyInfo.cs
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.csproj.CoreCompileInputs.cache
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpec.D426ACA6.Up2Date
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ZontSpecExtractor.genruntimeconfig.cache
+C:\Users\JUSTI\Desktop\v3ZontSpec\obj\Debug\net8.0-windows7.0\ref\ZontSpecExtractor.dll
